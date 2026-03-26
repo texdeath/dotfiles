@@ -1,0 +1,5 @@
+# Secrets registry (key names are private)
+secrets/registry.tsv
+
+# OS
+.DS_Store
