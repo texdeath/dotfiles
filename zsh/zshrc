@@ -1,0 +1,28 @@
+#### 基本設定 ########################################################
+
+export LANG=ja_JP.UTF-8
+export LC_CTYPE=ja_JP.UTF-8
+
+# 履歴設定
+HISTFILE=$HOME/.zsh_history
+HISTSIZE=100000
+SAVEHIST=100000
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_REDUCE_BLANKS
+setopt SHARE_HISTORY
+
+bindkey -e  # Emacs キーバインド
+setopt AUTO_CD AUTO_PUSHD PUSHD_IGNORE_DUPS CORRECT NO_BEEP
+
+#### モジュール読み込み ##############################################
+
+for f in \
+  "$HOME/.zsh/tools.zsh" \
+  "$HOME/.zsh/plugins.zsh" \
+  "$HOME/.zsh/completions.zsh" \
+  "$HOME/.zsh/aliases.zsh" \
+  "$HOME/.zsh/functions.zsh" \
+  "$HOME/.zsh/prompt.zsh"
+do
+  [[ -f "$f" ]] && source "$f"
+done

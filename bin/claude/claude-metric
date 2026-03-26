@@ -1,0 +1,7 @@
+#!/bin/bash
+# Claude Code メトリクスレポート
+# 使用方法:
+#   claude-metric       # 過去7日間のレポート
+#   claude-metric 14    # 過去14日間のレポート
+
+bash "$HOME/.claude/hooks/metrics-analyze.sh" "${1:-7}"
