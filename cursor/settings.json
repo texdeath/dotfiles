@@ -1,0 +1,12 @@
+{
+  "workbench.colorTheme": "Cursor Dark Midnight",
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "files.autoSave": "afterDelay",
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "chatgpt.localeOverride": "ja-JP",
+  "git.autoRepositoryDetection": "subFolders"
+}

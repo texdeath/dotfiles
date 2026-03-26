@@ -1,0 +1,10 @@
+anysphere.cursorpyright
+cweijan.dbclient-jdbc
+cweijan.vscode-mysql-client2
+esbenp.prettier-vscode
+golang.go
+hashicorp.terraform
+ms-python.debugpy
+ms-python.python
+openai.chatgpt
+renesaarsoo.sql-formatter-vsc

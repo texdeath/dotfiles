@@ -1,0 +1,5 @@
+[user]
+	name = texdeath
+	email = texdeath@gmail.com
+[core]
+	excludesfile = ~/.gitignore_global
