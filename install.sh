@@ -35,11 +35,11 @@ printf '  \033[1mtexdeath/dotfiles インストーラー\033[0m\n'
 echo ""
 echo "  ┌─────────────────────────────────────────────┐"
 echo "  │  1. Xcode CLI Tools                         │"
-echo "  │  2. シンボリックリンク  (zsh, git, bin)      │"
+echo "  │  2. シンボリックリンク                       │"
 echo "  │  3. Homebrew + アプリ                        │"
-echo "  │  4. 言語ランタイム     (Go, Python, Node, Rust)│"
+echo "  │  4. 言語ランタイム (mise + Volta + Rust)     │"
 echo "  │  5. Cursor                                   │"
-echo "  │  6. アプリ設定         (Karabiner, Ghostty)  │"
+echo "  │  6. アプリ設定 (Karabiner, Ghostty, lazygit) │"
 echo "  │  7. macOS defaults                           │"
 echo "  │  8. Automator ワークフロー                    │"
 echo "  │  9. 検証                                     │"
@@ -81,6 +81,16 @@ for d in fileops editor notion claude; do
 done
 ok "bin (fileops, editor, notion, claude)"
 
+# mise (.tool-versions)
+ln -sf "$DOTFILES/.tool-versions" "$HOME/.tool-versions"
+ok ".tool-versions"
+
+# lazygit
+LAZYGIT_DST="$HOME/.config/lazygit"
+mkdir -p "$LAZYGIT_DST"
+ln -sf "$DOTFILES/lazygit/config.yml" "$LAZYGIT_DST/config.yml"
+ok "lazygit"
+
 # --- 3. Homebrew ---
 step "Homebrew + アプリ"
 
@@ -98,10 +108,33 @@ wait $PID_BREW && ok "brew bundle 完了" || warn "brew bundle 失敗 (ログ: $
 # --- 4. 言語ランタイム ---
 step "言語ランタイム"
 
-bash "$DOTFILES/languages.sh" > "$LOG_DIR/languages.log" 2>&1 &
-PID_LANG=$!
-spin $PID_LANG "Go, Python, Node.js, Rust..."
-wait $PID_LANG && ok "言語ランタイム インストール完了" || warn "言語ランタイム 失敗 (ログ: $LOG_DIR/languages.log)"
+# Go / Python (mise)
+if command -v mise >/dev/null 2>&1; then
+  mise install > "$LOG_DIR/mise.log" 2>&1 &
+  PID_MISE=$!
+  spin $PID_MISE "mise install (Go, Python)..."
+  wait $PID_MISE && ok "mise install 完了" || warn "mise install 失敗 (ログ: $LOG_DIR/mise.log)"
+else
+  warn "mise が見つかりません。brew bundle を確認してください"
+fi
+
+# Node.js (Volta)
+if command -v volta >/dev/null 2>&1; then
+  volta install node@24 > "$LOG_DIR/volta.log" 2>&1
+  volta install yarn@4 >> "$LOG_DIR/volta.log" 2>&1
+  ok "Volta: node@24, yarn@4"
+else
+  warn "volta が見つかりません。brew bundle を確認してください"
+fi
+
+# Rust
+if command -v rustup >/dev/null 2>&1; then
+  rustup update stable > "$LOG_DIR/rust.log" 2>&1
+  ok "Rust: stable 更新済み"
+else
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > "$LOG_DIR/rust.log" 2>&1
+  ok "Rust: 新規インストール"
+fi
 
 # --- 5. Cursor ---
 step "Cursor"
@@ -122,7 +155,7 @@ step "アプリ設定"
 KARABINER_DST="$HOME/.config/karabiner"
 mkdir -p "$KARABINER_DST"
 cp "$DOTFILES/karabiner/karabiner.json" "$KARABINER_DST/karabiner.json"
-ok "Karabiner Elements (⌘英数/かな)"
+ok "Karabiner Elements"
 
 # Ghostty
 GHOSTTY_DST="$HOME/.config/ghostty"
@@ -132,7 +165,6 @@ if [ -d "$DOTFILES/ghostty" ] && [ -f "$DOTFILES/ghostty/config" ]; then
   ok "Ghostty"
 else
   warn "Ghostty: 設定ファイルなし ($DOTFILES/ghostty/config)"
-  warn "  設定後に dotfiles/ghostty/config に保存してください"
 fi
 
 # Raycast
@@ -142,7 +174,6 @@ if [ -d "$DOTFILES/raycast" ] && ls "$DOTFILES"/raycast/*.rayconfig >/dev/null 2
   ok "  ファイル: $(ls "$DOTFILES"/raycast/*.rayconfig)"
 else
   warn "Raycast: .rayconfig なし"
-  warn "  Export: Raycast > Settings > Advanced > Export → $DOTFILES/raycast/"
 fi
 
 # --- 7. macOS defaults ---
@@ -172,13 +203,20 @@ fi
 step "検証"
 
 errors=0
-command -v brew >/dev/null 2>&1    && ok "brew"   || { warn "brew が見つかりません"; errors=$((errors + 1)); }
-command -v go >/dev/null 2>&1      && ok "go $(go version | awk '{print $3}')" || { warn "go が見つかりません"; errors=$((errors + 1)); }
-command -v python3 >/dev/null 2>&1 && ok "python $(python3 --version 2>&1 | awk '{print $2}')" || { warn "python3 が見つかりません"; errors=$((errors + 1)); }
-command -v node >/dev/null 2>&1    && ok "node $(node --version)" || { warn "node が見つかりません"; errors=$((errors + 1)); }
-command -v rustc >/dev/null 2>&1   && ok "rustc $(rustc --version | awk '{print $2}')" || { warn "rustc が見つかりません"; errors=$((errors + 1)); }
+command -v brew >/dev/null 2>&1     && ok "brew"   || { warn "brew が見つかりません"; errors=$((errors + 1)); }
+command -v mise >/dev/null 2>&1     && ok "mise"   || { warn "mise が見つかりません"; errors=$((errors + 1)); }
+command -v go >/dev/null 2>&1       && ok "go $(go version | awk '{print $3}')" || { warn "go が見つかりません"; errors=$((errors + 1)); }
+command -v python3 >/dev/null 2>&1  && ok "python $(python3 --version 2>&1 | awk '{print $2}')" || { warn "python3 が見つかりません"; errors=$((errors + 1)); }
+command -v node >/dev/null 2>&1     && ok "node $(node --version)" || { warn "node が見つかりません"; errors=$((errors + 1)); }
+command -v volta >/dev/null 2>&1    && ok "volta"  || { warn "volta が見つかりません"; errors=$((errors + 1)); }
+command -v rustc >/dev/null 2>&1    && ok "rustc $(rustc --version | awk '{print $2}')" || { warn "rustc が見つかりません"; errors=$((errors + 1)); }
+command -v delta >/dev/null 2>&1    && ok "delta"  || { warn "delta が見つかりません"; errors=$((errors + 1)); }
+command -v lazygit >/dev/null 2>&1  && ok "lazygit" || { warn "lazygit が見つかりません"; errors=$((errors + 1)); }
+command -v direnv >/dev/null 2>&1   && ok "direnv" || { warn "direnv が見つかりません"; errors=$((errors + 1)); }
+command -v zoxide >/dev/null 2>&1   && ok "zoxide" || { warn "zoxide が見つかりません"; errors=$((errors + 1)); }
 [ -L "$HOME/.zshrc" ]              && ok ".zshrc リンク済み" || { warn ".zshrc 未リンク"; errors=$((errors + 1)); }
 [ -L "$HOME/.gitconfig" ]          && ok ".gitconfig リンク済み" || { warn ".gitconfig 未リンク"; errors=$((errors + 1)); }
+[ -L "$HOME/.tool-versions" ]      && ok ".tool-versions リンク済み" || { warn ".tool-versions 未リンク"; errors=$((errors + 1)); }
 
 TOTAL_ELAPSED=$(( SECONDS - START_TIME ))
 

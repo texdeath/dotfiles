@@ -1,10 +1,11 @@
-# anyenv (キャッシュで高速化)
-export GOENV_GOPATH_PREFIX="$HOME/.go"
-ANYENV_CACHE="$HOME/.zsh/.anyenv-cache.zsh"
-if [[ ! -f "$ANYENV_CACHE" || "$HOME/.anyenv" -nt "$ANYENV_CACHE" ]]; then
-  anyenv init - > "$ANYENV_CACHE"
+# mise (Go / Python ランタイム管理)
+if command -v mise >/dev/null 2>&1; then
+  eval "$(mise activate zsh)"
 fi
-source "$ANYENV_CACHE"
+
+# Volta (Node.js 管理)
+export VOLTA_HOME="$HOME/.volta"
+export PATH="$VOLTA_HOME/bin:$PATH"
 
 # ghq
 export GHQ_ROOT="$HOME/ghq"
@@ -20,5 +21,15 @@ else
   export FZF_DEFAULT_OPTS='--height=40% --border --reverse'
 fi
 
-# Google Cloud SDK (PATH のみ。completion は plugins 後に読み込む)
+# direnv
+if command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv hook zsh)"
+fi
+
+# zoxide
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init zsh)"
+fi
+
+# Google Cloud SDK
 if [ -f "$HOME/.google-cloud-sdk/path.zsh.inc" ]; then . "$HOME/.google-cloud-sdk/path.zsh.inc"; fi

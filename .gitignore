@@ -3,3 +3,6 @@ secrets/registry.tsv
 
 # OS
 .DS_Store
+
+# Shell cache
+zsh/.anyenv-cache.zsh
