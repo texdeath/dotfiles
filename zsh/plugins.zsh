@@ -5,6 +5,7 @@ if [[ ! -f $HOME/.zinit/bin/zinit.zsh ]]; then
 fi
 
 source "$HOME/.zinit/bin/zinit.zsh"
+unalias zi 2>/dev/null  # zoxide の zi と競合するため
 
 # プラグイン
 zinit light zsh-users/zsh-completions
@@ -13,7 +14,6 @@ zstyle ':completion:*' menu no
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}'
 zstyle ':fzf-tab:*' switch-group 'ctrl-h' 'ctrl-l'
 
-zinit light agkozak/zsh-z
 zinit light zsh-users/zsh-autosuggestions
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=8'
 
