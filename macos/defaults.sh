@@ -12,9 +12,10 @@ info "macOS defaults を適用中..."
 echo ""
 
 # --- キーボード ---
-defaults write NSGlobalDomain KeyRepeat -int 5
-defaults write NSGlobalDomain InitialKeyRepeat -int 15
-ok "キーリピート: 速度=5, 開始=15"
+# 値は小さいほど速い（Backspace の連続削除速度にも反映）
+defaults write NSGlobalDomain KeyRepeat -int 2
+defaults write NSGlobalDomain InitialKeyRepeat -int 10
+ok "キーリピート: 速度=2, 開始=10"
 
 # --- Dock ---
 defaults write com.apple.dock tilesize -int 35
