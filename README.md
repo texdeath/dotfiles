@@ -45,6 +45,12 @@ cd dotfiles
     └── keybindings.json # キーバインド
 ```
 
+## 設計ドキュメント
+
+- [Public / Private リポジトリ統合設計](docs/public-private-integration-design.md)
+
+Public / Private の責務分離と、段階的な統合方針は上記ドキュメントを参照。
+
 ## 更新方法
 
 ### Brewfile
