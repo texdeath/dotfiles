@@ -110,7 +110,7 @@ dotfiles/
 Push / PR で以下を自動検証:
 
 - **dry-run**: `install.sh --dry-run` でソースファイルの存在チェック
-- **boundary-check**: 社内キーワードと絶対パス (`/Users/`) の混入検出
+- **boundary-check**: 社内キーワードとハードコードされた絶対パスの混入検出
 
 ## Private overlay との統合
 
