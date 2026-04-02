@@ -1,4 +1,4 @@
-name: Public boundary check
+name: CI
 
 on:
   push:
@@ -7,7 +7,15 @@ on:
     branches: [master]
 
 jobs:
-  check:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dry-run install
+        run: ./install.sh --dry-run
+
+  boundary-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
