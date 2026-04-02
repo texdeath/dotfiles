@@ -31,53 +31,82 @@ for ((i=0; i<TOTAL_STEPS; i++)); do
   STEP_TIME+=("")
 done
 
-# --- 進捗表示 ---
-_progress_drawn=false
+_detail_lines=0
+_step_start_time=$SECONDS
 
-draw_progress() {
-  # 2回目以降は前の表示を消す
-  if [ "$_progress_drawn" = true ]; then
-    printf '\033[%dA' "$((TOTAL_STEPS + 1))"
+# ok/warn/fail を上書きして詳細行数をカウント
+_orig_ok()   { printf '  \033[1;32m✓\033[0m %s\n' "$1"; }
+_orig_warn() { printf '  \033[1;33m!\033[0m %s\n' "$1"; }
+_orig_fail() { printf '  \033[1;31m✗\033[0m %s\n' "$1"; DRY_RUN_ERRORS=$((DRY_RUN_ERRORS + 1)); }
+
+ok()   { printf '      \033[1;32m✓\033[0m %s\n' "$1"; _detail_lines=$((_detail_lines + 1)); }
+warn() { printf '      \033[1;33m!\033[0m %s\n' "$1"; _detail_lines=$((_detail_lines + 1)); }
+fail() { printf '      \033[1;31m✗\033[0m %s\n' "$1"; DRY_RUN_ERRORS=$((DRY_RUN_ERRORS + 1)); _detail_lines=$((_detail_lines + 1)); }
+
+# dry_skip も詳細行数カウント
+dry_skip() {
+  if [ "$DRY_RUN" = true ]; then
+    printf '      \033[2m[skip] %s\033[0m\n' "$1"
+    _detail_lines=$((_detail_lines + 1))
+    return 0
   fi
-  _progress_drawn=true
+  return 1
+}
 
-  for ((i=0; i<TOTAL_STEPS; i++)); do
-    local num=$((i + 1))
-    local name="${STEP_NAMES[$i]}"
-    local status="${STEP_STATUS[$i]}"
-    local time="${STEP_TIME[$i]}"
+# ステップ行を1行描画
+_draw_step_line() {
+  local i=$1
+  local num=$((i + 1))
+  local name="${STEP_NAMES[$i]}"
+  local status="${STEP_STATUS[$i]}"
+  local time="${STEP_TIME[$i]}"
 
-    case "$status" in
-      done)
-        printf '  \033[1;32m✔\033[0m %d. %s' "$num" "$name"
-        [ -n "$time" ] && printf ' \033[2m(%s)\033[0m' "$time"
-        ;;
-      running)
-        printf '  \033[1;36m▸\033[0m %d. \033[1m%s\033[0m' "$num" "$name"
-        ;;
-      pending)
-        printf '  \033[2m☐ %d. %s\033[0m' "$num" "$name"
-        ;;
-      skip)
-        printf '  \033[2m─ %d. %s (skip)\033[0m' "$num" "$name"
-        ;;
-    esac
-    printf '\033[K\n'
-  done
-  printf '\033[K'
+  case "$status" in
+    done)
+      printf '  \033[1;32m✔\033[0m %d. %s' "$num" "$name"
+      [ -n "$time" ] && printf ' \033[2m(%s)\033[0m' "$time"
+      ;;
+    running)
+      printf '  \033[1;36m▸\033[0m %d. \033[1m%s\033[0m' "$num" "$name"
+      ;;
+    pending)
+      printf '  \033[2m☐ %d. %s\033[0m' "$num" "$name"
+      ;;
+  esac
+  printf '\033[K\n'
 }
 
 step() {
-  local step_start=$SECONDS
-
-  # 前のステップを完了にする
+  # 前のステップを完了にして詳細行をクリア
   if [ "$CURRENT_STEP" -gt 0 ]; then
     local prev=$((CURRENT_STEP - 1))
-    if [ "${STEP_STATUS[$prev]}" = "running" ]; then
-      STEP_STATUS[$prev]="done"
-      local elapsed=$(( SECONDS - _step_start_time ))
-      STEP_TIME[$prev]=$(printf '%d:%02d' $((elapsed / 60)) $((elapsed % 60)))
-    fi
+    STEP_STATUS[$prev]="done"
+    local elapsed=$(( SECONDS - _step_start_time ))
+    STEP_TIME[$prev]=$(printf '%d:%02d' $((elapsed / 60)) $((elapsed % 60)))
+
+    # 詳細行 + 残りのペンディング行を巻き戻す
+    local remaining=$((TOTAL_STEPS - CURRENT_STEP))
+    local up=$((_detail_lines + remaining))
+    [ "$up" -gt 0 ] && printf '\033[%dA' "$up"
+
+    # 完了したステップ行を再描画
+    _draw_step_line "$prev"
+
+    # 詳細行をクリア
+    for ((i=0; i<_detail_lines; i++)); do
+      printf '\033[K\n'
+    done
+
+    # 残りのペンディング行をクリア（位置を詰める）
+    for ((i=0; i<remaining; i++)); do
+      printf '\033[K\n'
+    done
+
+    # 全部戻って正しい位置から再描画
+    local back=$((_detail_lines + remaining))
+    [ "$back" -gt 0 ] && printf '\033[%dA' "$back"
+
+    _detail_lines=0
   fi
 
   CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -85,10 +114,15 @@ step() {
   STEP_STATUS[$idx]="running"
   _step_start_time=$SECONDS
 
-  draw_progress
-}
+  # 現在のステップ行
+  _draw_step_line "$idx"
 
-_step_start_time=$SECONDS
+  # 残りのペンディング行
+  for ((i=idx+1; i<TOTAL_STEPS; i++)); do
+    _draw_step_line "$i"
+  done
+  # 詳細出力は残りステップの下に出る
+}
 
 echo ""
 printf '  \033[1mtexdeath/dotfiles インストーラー\033[0m\n'
@@ -97,8 +131,10 @@ if [ "$DRY_RUN" = true ]; then
 fi
 echo ""
 
-# 初期表示
-draw_progress
+# 初期リスト描画
+for ((i=0; i<TOTAL_STEPS; i++)); do
+  _draw_step_line "$i"
+done
 
 # --- ステップ実行 ---
 for s in "$DOTFILES"/steps/[0-9]*.sh; do
@@ -111,7 +147,17 @@ if [ "$CURRENT_STEP" -gt 0 ]; then
   STEP_STATUS[$_prev]="done"
   _elapsed=$(( SECONDS - _step_start_time ))
   STEP_TIME[$_prev]=$(printf '%d:%02d' $((_elapsed / 60)) $((_elapsed % 60)))
-  draw_progress
+
+  _remaining=$((TOTAL_STEPS - CURRENT_STEP))
+  _up=$((_detail_lines + _remaining))
+  [ "$_up" -gt 0 ] && printf '\033[%dA' "$_up"
+  _draw_step_line "$_prev"
+  for ((i=0; i<_detail_lines; i++)); do
+    printf '\033[K\n'
+  done
+  for ((i=0; i<_remaining; i++)); do
+    printf '\033[K\n'
+  done
 fi
 
 # --- 結果表示 ---
