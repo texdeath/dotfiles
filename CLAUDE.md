@@ -22,9 +22,11 @@
 
 ## Public 境界
 
-- CI が `BOUNDARY_PATTERNS`（GitHub Secret）と絶対パスの混入を検出する
-- `docs/` と `.github/` は CI チェック対象外
-- README やコメントにも社内キーワードを書かない（説明文であっても）
+- **pre-commit hook** が絶対パスと社内キーワードの混入をコミット前に検出する
+- **CI** が push/PR で同様のチェックを実行する（`BOUNDARY_PATTERNS` GitHub Secret）
+- `docs/` と `.github/` はチェック対象外
+- README、CLAUDE.md、コメントにも社内キーワードを書かない（説明文であっても）
+- git hooks path: `.githooks/`（`git config core.hooksPath .githooks` で有効化）
 
 ## install.sh の構造
 
