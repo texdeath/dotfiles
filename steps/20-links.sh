@@ -37,3 +37,11 @@ LAZYGIT_DST="$HOME/.config/lazygit"
 dry_mkdir "$LAZYGIT_DST"
 dry_link "$DOTFILES/lazygit/config.yml" "$LAZYGIT_DST/config.yml"
 ok "lazygit"
+
+# git hooks
+if [ "$DRY_RUN" = true ]; then
+  ok "git hooks (.githooks/)"
+else
+  git -C "$DOTFILES" config core.hooksPath .githooks
+  ok "git hooks (.githooks/)"
+fi
