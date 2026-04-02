@@ -45,6 +45,13 @@ graph TB
     style I fill:#ff6b6b,color:#fff
 ```
 
+## install.sh のオプション
+
+| フラグ | 内容 |
+|-------|------|
+| （なし） | 全ステップを実行 |
+| `--dry-run` | ソースファイルの存在チェックのみ（実際の変更なし） |
+
 ## install.sh の実行内容
 
 | ステップ | 内容 |
@@ -83,8 +90,9 @@ dotfiles/
 │   ├── editor/           # → ~/bin/editor（diff ビュー操作）
 │   ├── notion/           # → ~/bin/notion（Markdown → Notion 変換）
 │   └── claude/           # → ~/bin/claude（メトリクス）
+├── VERSION               # semver バージョン（private overlay のバージョンチェック用）
 ├── secrets/
-│   ├── bw-secret.sh      # → ~/bin/bw-secret.sh（Bitwarden CLI ヘルパー）
+│   ├── bw-secret.sh      # → ~/bin/bw-secret.sh（Bitwarden CLI ヘルパー、REGISTRY_PRIVATE 対応）
 │   └── registry.tsv      # 汎用シークレット登録簿（gitignore）
 ├── cursor/               # Cursor 拡張機能・設定
 ├── karabiner/            # Karabiner Elements 設定
@@ -92,9 +100,17 @@ dotfiles/
 ├── lazygit/              # lazygit 設定
 ├── macos/                # macOS defaults
 ├── automator/            # Automator ワークフロー
+├── .github/workflows/    # CI（dry-run + public 境界チェック）
 └── docs/
     └── public-private-integration-design.md
 ```
+
+## CI
+
+Push / PR で以下を自動検証:
+
+- **dry-run**: `install.sh --dry-run` でソースファイルの存在チェック
+- **boundary-check**: 社内キーワード（`REDACTED_ORG`, `REDACTED_PROJECT` 等）と絶対パス (`/Users/`) の混入検出
 
 ## Private overlay との統合
 
