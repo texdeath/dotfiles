@@ -4,4 +4,10 @@
 #   claude-metric       # 過去7日間のレポート
 #   claude-metric 14    # 過去14日間のレポート
 
-bash "$HOME/.claude/hooks/metrics-analyze.sh" "${1:-7}"
+METRICS_SCRIPT="$HOME/.claude/hooks/metrics-analyze.sh"
+if [ -f "$METRICS_SCRIPT" ]; then
+  bash "$METRICS_SCRIPT" "${1:-7}"
+else
+  echo "metrics-analyze.sh が見つかりません (private overlay 未導入)" >&2
+  exit 1
+fi

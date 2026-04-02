@@ -81,6 +81,10 @@ for d in fileops editor notion claude; do
 done
 ok "bin (fileops, editor, notion, claude)"
 
+# secrets
+ln -sf "$DOTFILES/secrets/bw-secret.sh" "$HOME/bin/bw-secret.sh"
+ok "bin/bw-secret.sh"
+
 # mise (.tool-versions)
 ln -sf "$DOTFILES/.tool-versions" "$HOME/.tool-versions"
 ok ".tool-versions"

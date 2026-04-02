@@ -18,5 +18,5 @@ alias gl='git log --oneline --graph --decorate'
 alias gp='git push'
 alias gpl='git pull'
 
-# プロジェクト
-alias psync='~/bin/project/sync.sh'
+# プロジェクト（private overlay 導入時のみ有効）
+[ -x "$HOME/bin/project/sync.sh" ] && alias psync='~/bin/project/sync.sh'
