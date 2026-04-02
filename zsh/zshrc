@@ -26,3 +26,9 @@ for f in \
 do
   [[ -f "$f" ]] && source "$f"
 done
+
+#### Private overlay（存在する場合のみ読み込み） #####################
+
+for f in "$HOME"/.zsh/private/*.zsh(N); do
+  source "$f"
+done
