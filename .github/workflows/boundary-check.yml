@@ -1,0 +1,60 @@
+name: Public boundary check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for internal keywords
+        run: |
+          echo "=== Checking for internal/private keywords ==="
+          PATTERNS=(
+            'REDACTED_ORG'
+            'REDACTED_PROJECT'
+            'REDACTED_REPO_PREFIX'
+            'REDACTED_OVERLAY_REPO'
+          )
+          errors=0
+          for pattern in "${PATTERNS[@]}"; do
+            # docs/ は設計ドキュメントなので除外
+            matches=$(grep -r --include='*.sh' --include='*.zsh' --include='*.json' \
+              --include='*.yml' --include='*.toml' \
+              -l "$pattern" . --exclude-dir=docs --exclude-dir=.github 2>/dev/null || true)
+            if [ -n "$matches" ]; then
+              echo "❌ '$pattern' found in:"
+              echo "$matches" | sed 's/^/  /'
+              errors=$((errors + 1))
+            else
+              echo "✓ '$pattern' not found"
+            fi
+          done
+
+          if [ "$errors" -gt 0 ]; then
+            echo ""
+            echo "❌ Internal keywords detected in public files."
+            echo "Move these to the private overlay repo or use placeholders."
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ No internal keywords found"
+
+      - name: Check for absolute paths
+        run: |
+          echo "=== Checking for hardcoded absolute paths ==="
+          matches=$(grep -r '/Users/' . --include='*.sh' --include='*.zsh' \
+            --include='*.json' --include='*.yml' --include='*.toml' \
+            --exclude-dir=docs --exclude-dir=.github 2>/dev/null || true)
+          if [ -n "$matches" ]; then
+            echo "❌ Absolute paths found:"
+            echo "$matches" | sed 's/^/  /'
+            exit 1
+          fi
+          echo "✅ No absolute paths found"
