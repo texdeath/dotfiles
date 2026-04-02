@@ -66,11 +66,32 @@ graph TB
 | 8 | Automator ワークフロー |
 | 9 | 検証 |
 
+## 設定適用方式
+
+| 対象 | 方式 | 再実行時の挙動 | ユーザー編集 |
+|------|------|--------------|------------|
+| zsh (zshrc, modules) | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
+| git (gitconfig, gitignore) | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
+| bin/ (fileops, editor, notion, claude) | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
+| bw-secret.sh | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
+| .tool-versions | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
+| lazygit | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
+| Ghostty | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
+| Karabiner | copy | 上書き（ローカル変更は消える） | ローカルで編集後、リポジトリに戻す |
+| Automator | copy | 上書き（ローカル変更は消える） | ローカルで編集後、リポジトリに戻す |
+| Raycast | manual import | 手動（自動適用なし） | Raycast UI で設定 |
+| Homebrew | brew bundle | 追加のみ（既存パッケージは消えない） | `brew bundle dump` で同期 |
+| 言語ランタイム | mise / volta / rustup | バージョン更新 | .tool-versions を編集 |
+| Cursor | cursor CLI | 拡張追加 + 設定上書き | Cursor UI で設定 |
+| macOS defaults | defaults write | 上書き | システム環境設定で変更可（再実行で戻る） |
+
 ## 構成
 
 ```
 dotfiles/
-├── install.sh            # 全体セットアップスクリプト
+├── install.sh            # オーケストレーター（steps/ を順に実行）
+├── steps/                # 各ステップの実装（10-xcode 〜 90-verify）
+│   └── lib.sh            # 共通ヘルパー関数
 ├── Brewfile              # Homebrew パッケージ一覧
 ├── .tool-versions        # mise (Go, Python) バージョン定義
 ├── zsh/
