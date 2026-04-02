@@ -1,0 +1,41 @@
+#!/bin/bash
+# Public 境界チェック（コミット前）
+# BOUNDARY_PATTERNS_FILE が存在すればそこからパターンを読む
+# なければ基本的なチェック（絶対パスのみ）を実行
+
+PATTERNS_FILE="${BOUNDARY_PATTERNS_FILE:-}"
+errors=0
+
+# ステージングされたファイルを対象にチェック
+staged_files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(sh|zsh|json|yml|toml|md)$' | grep -v '^docs/' | grep -v '^\.github/')
+
+if [ -z "$staged_files" ]; then
+  exit 0
+fi
+
+# 絶対パスチェック
+matches=$(echo "$staged_files" | xargs grep -l '/Users/' 2>/dev/null || true)
+if [ -n "$matches" ]; then
+  echo "❌ pre-commit: 絶対パスが含まれています:"
+  echo "$matches" | sed 's/^/  /'
+  errors=$((errors + 1))
+fi
+
+# パターンファイルがあればキーワードチェック
+if [ -n "$PATTERNS_FILE" ] && [ -f "$PATTERNS_FILE" ]; then
+  while IFS= read -r pattern; do
+    [ -z "$pattern" ] && continue
+    matches=$(echo "$staged_files" | xargs grep -l "$pattern" 2>/dev/null || true)
+    if [ -n "$matches" ]; then
+      echo "❌ pre-commit: 社内キーワードが含まれています:"
+      echo "$matches" | sed 's/^/  /'
+      errors=$((errors + 1))
+    fi
+  done < "$PATTERNS_FILE"
+fi
+
+if [ "$errors" -gt 0 ]; then
+  echo ""
+  echo "コミットを中止しました。docs/ または .github/ 以外から社内情報を除去してください。"
+  exit 1
+fi
