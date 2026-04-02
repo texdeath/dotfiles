@@ -3,7 +3,7 @@
 ## リポジトリの性質
 
 - **Public リポジトリ**。社内キーワード、組織名、プロジェクト名、内部ドメインを一切含めない
-- Private overlay（texdeath-workstation）と統合設計されている。詳細は `docs/public-private-integration-design.md`
+- Private overlay と統合設計されている。詳細は `docs/public-private-integration-design.md`
 
 ## コミットルール
 
