@@ -47,11 +47,13 @@ CI で使う Secret のマスターデータは Bitwarden で管理する。
 # 1. Bitwarden のデータを更新（必要な場合）
 bw-secret.sh --save <key> <file>
 
-# 2. GitHub Secrets に同期
-bw-secret.sh <key> | gh secret set <SECRET_NAME> --repo texdeath/dotfiles --body -
+# 2. GitHub Secrets に同期（ファイル経由）
+bw-secret.sh <key> > /tmp/secret.txt
+gh secret set <SECRET_NAME> --repo texdeath/dotfiles < /tmp/secret.txt
+rm /tmp/secret.txt
 ```
 
-`--body -` は stdin から値を読み取る指定。パイプで `bw-secret.sh` の出力を渡す。
+注意: パイプ（`| --body -`）は BrokenPipeError で値が途中で切れる場合があるため、ファイル経由で渡す。
 
 ### 登録済み Secret
 
