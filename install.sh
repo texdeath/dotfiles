@@ -6,6 +6,17 @@ LOG_DIR=$(mktemp -d)
 TOTAL_STEPS=9
 CURRENT_STEP=0
 START_TIME=$SECONDS
+DRY_RUN=false
+[[ "${1:-}" == "--dry-run" ]] && { DRY_RUN=true; }
+
+# dry-run 対応: 実際のコマンドの代わりにログ出力
+run() {
+  if [ "$DRY_RUN" = true ]; then
+    printf '  \033[2m[dry-run] %s\033[0m\n' "$*"
+  else
+    "$@"
+  fi
+}
 
 step() {
   CURRENT_STEP=$((CURRENT_STEP + 1))
