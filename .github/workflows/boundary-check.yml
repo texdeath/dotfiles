@@ -21,28 +21,30 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check for internal keywords
+        env:
+          BOUNDARY_PATTERNS: ${{ secrets.BOUNDARY_PATTERNS }}
         run: |
+          if [ -z "$BOUNDARY_PATTERNS" ]; then
+            echo "⚠️  BOUNDARY_PATTERNS secret is not set, skipping keyword check"
+            exit 0
+          fi
+
           echo "=== Checking for internal/private keywords ==="
-          PATTERNS=(
-            'REDACTED_ORG'
-            'REDACTED_PROJECT'
-            'REDACTED_REPO_PREFIX'
-            'REDACTED_OVERLAY_REPO'
-          )
           errors=0
-          for pattern in "${PATTERNS[@]}"; do
-            # docs/ は設計ドキュメントなので除外
+          while IFS= read -r pattern; do
+            [ -z "$pattern" ] && continue
+            # docs/ と .github/ は除外
             matches=$(grep -r --include='*.sh' --include='*.zsh' --include='*.json' \
-              --include='*.yml' --include='*.toml' \
+              --include='*.yml' --include='*.toml' --include='*.md' \
               -l "$pattern" . --exclude-dir=docs --exclude-dir=.github 2>/dev/null || true)
             if [ -n "$matches" ]; then
-              echo "❌ '$pattern' found in:"
+              echo "❌ Pattern match found in:"
               echo "$matches" | sed 's/^/  /'
               errors=$((errors + 1))
             else
-              echo "✓ '$pattern' not found"
+              echo "✓ Pattern clean"
             fi
-          done
+          done <<< "$BOUNDARY_PATTERNS"
 
           if [ "$errors" -gt 0 ]; then
             echo ""
@@ -58,7 +60,7 @@ jobs:
         run: |
           echo "=== Checking for hardcoded absolute paths ==="
           matches=$(grep -r '/Users/' . --include='*.sh' --include='*.zsh' \
-            --include='*.json' --include='*.yml' --include='*.toml' \
+            --include='*.json' --include='*.yml' --include='*.toml' --include='*.md' \
             --exclude-dir=docs --exclude-dir=.github 2>/dev/null || true)
           if [ -n "$matches" ]; then
             echo "❌ Absolute paths found:"
