@@ -14,6 +14,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REGISTRY="$SCRIPT_DIR/registry.tsv"
+REGISTRY_PRIVATE="${REGISTRY_PRIVATE:-}"
 BW_FOLDER="dotfiles"
 
 err()  { printf '\033[1;31m[ERROR]\033[0m %s\n' "$1" >&2; }
@@ -209,41 +210,55 @@ restore_file() {
   ok "$item_name → $dest に復元しました"
 }
 
-# --- 登録簿一覧 ---
-list_registry() {
-  if [ ! -f "$REGISTRY" ]; then
+# --- 登録簿ファイルの列挙 ---
+_registry_files() {
+  local files=()
+  [ -f "$REGISTRY" ] && files+=("$REGISTRY")
+  if [ -n "$REGISTRY_PRIVATE" ] && [ -f "$REGISTRY_PRIVATE" ]; then
+    files+=("$REGISTRY_PRIVATE")
+  fi
+  if [ ${#files[@]} -eq 0 ]; then
     err "登録簿が見つかりません: $REGISTRY"
     exit 1
   fi
+  echo "${files[@]}"
+}
+
+# --- 登録簿一覧 ---
+list_registry() {
+  local files
+  read -ra files <<< "$(_registry_files)"
 
   printf '\033[1m%-30s %-10s %-40s\033[0m\n' "BITWARDEN ITEM" "TYPE" "USAGE"
-  while IFS=$'\t' read -r key type usage; do
-    [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-    printf "%-30s %-10s %-40s\n" "${BW_FOLDER}/${key}" "$type" "$usage"
-  done < "$REGISTRY"
+  for f in "${files[@]}"; do
+    while IFS=$'\t' read -r key type usage; do
+      [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+      printf "%-30s %-10s %-40s\n" "${BW_FOLDER}/${key}" "$type" "$usage"
+    done < "$f"
+  done
 }
 
 # --- 全キーの存在確認 ---
 check_registry() {
-  if [ ! -f "$REGISTRY" ]; then
-    err "登録簿が見つかりません: $REGISTRY"
-    exit 1
-  fi
+  local files
+  read -ra files <<< "$(_registry_files)"
 
   ensure_bw
   ensure_session
 
   local errors=0
-  while IFS=$'\t' read -r key type usage; do
-    [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-    local item_name="${BW_FOLDER}/${key}"
-    if bw get item "$item_name" >/dev/null 2>&1; then
-      ok "$item_name ($type)"
-    else
-      err "$item_name — 未登録"
-      errors=$((errors + 1))
-    fi
-  done < "$REGISTRY"
+  for f in "${files[@]}"; do
+    while IFS=$'\t' read -r key type usage; do
+      [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+      local item_name="${BW_FOLDER}/${key}"
+      if bw get item "$item_name" >/dev/null 2>&1; then
+        ok "$item_name ($type)"
+      else
+        err "$item_name — 未登録"
+        errors=$((errors + 1))
+      fi
+    done < "$f"
+  done
 
   if [ "$errors" -eq 0 ]; then
     echo ""
