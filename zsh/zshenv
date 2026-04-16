@@ -1,2 +1,2 @@
-export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/share/mise/shims:$HOME/bin:$HOME/.local/bin:$PATH"
 . "$HOME/.cargo/env"

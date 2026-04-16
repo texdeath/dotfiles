@@ -27,6 +27,12 @@ do
   [[ -f "$f" ]] && source "$f"
 done
 
+#### Claude Code ####################################################
+
+# Claude Code: デフォルトのeffort levelをmaxに設定 (2026-04-09)
+# settings.jsonではmaxが永続化できないバグがあるためenv varで設定
+export CLAUDE_CODE_EFFORT_LEVEL=max
+
 #### Private overlay（存在する場合のみ読み込み） #####################
 
 for f in "$HOME"/.zsh/private/*.zsh(N); do
