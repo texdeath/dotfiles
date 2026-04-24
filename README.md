@@ -59,7 +59,7 @@ graph TB
 | 1 | Xcode Command Line Tools |
 | 2 | シンボリックリンク（zsh, git, bin, lazygit, bw-secret.sh） |
 | 3 | Homebrew + `brew bundle` |
-| 4 | 言語ランタイム（mise + Volta + Rust） |
+| 4 | 言語ランタイム（mise + Rust） |
 | 5 | Cursor 拡張機能・設定 |
 | 6 | アプリ設定（Karabiner, Ghostty, Raycast） |
 | 7 | macOS defaults |
@@ -81,7 +81,7 @@ graph TB
 | Automator | copy | 上書き（ローカル変更は消える） | ローカルで編集後、リポジトリに戻す |
 | Raycast | manual import | 手動（自動適用なし） | Raycast UI で設定 |
 | Homebrew | brew bundle | 追加のみ（既存パッケージは消えない） | `brew bundle dump` で同期 |
-| 言語ランタイム | mise / volta / rustup | バージョン更新 | .tool-versions を編集 |
+| 言語ランタイム | mise / rustup | バージョン更新 | .tool-versions を編集 |
 | Cursor | cursor CLI | 拡張追加 + 設定上書き | Cursor UI で設定 |
 | macOS defaults | defaults write | 上書き | システム環境設定で変更可（再実行で戻る） |
 

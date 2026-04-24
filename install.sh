@@ -16,7 +16,7 @@ STEP_NAMES=(
   "Xcode CLI Tools"
   "シンボリックリンク"
   "Homebrew + アプリ"
-  "言語ランタイム (mise + Volta + Rust)"
+  "言語ランタイム (mise + Rust)"
   "Cursor"
   "アプリ設定 (Karabiner, Ghostty, lazygit)"
   "macOS defaults"

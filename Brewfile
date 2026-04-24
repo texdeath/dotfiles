@@ -1,6 +1,6 @@
-# === CLI ツール ===
-brew "bitwarden-cli"
+# === CLI tools ===
 brew "bat"
+brew "bitwarden-cli"
 brew "direnv"
 brew "eza"
 brew "fd"
@@ -10,29 +10,35 @@ brew "gh"
 brew "ghq"
 brew "git-delta"
 brew "git-filter-repo"
-brew "golang-migrate"
 brew "jq"
 brew "lazygit"
 brew "lefthook"
-brew "mise"
-brew "mkcert"
-brew "mysql-client"
 brew "peco"
-brew "pkgconf"
-brew "pnpm"
-brew "postgresql@17"
 brew "rclone"
 brew "ripgrep"
 brew "tmux"
-brew "uv"
-brew "volta"
 brew "yq"
 brew "zoxide"
 
-# === DB コネクタ ===
-brew "mariadb-connector-c"
+# === Runtime and package managers ===
+brew "mise"
+brew "pnpm"
+brew "uv"
 
-# === GUI アプリ ===
+# === Database tools ===
+brew "cloud-sql-proxy"
+brew "golang-migrate"
+brew "libpq"
+brew "mariadb-connector-c"
+brew "mkcert"
+brew "mysql-client"
+brew "pkgconf"
+brew "postgresql@17"
+
+# === CLI casks ===
+cask "codex"
+
+# === GUI apps ===
 cask "bitwarden"
 cask "bruno"
 cask "chatgpt"
@@ -41,11 +47,32 @@ cask "docker-desktop"
 cask "elecom-mouse-util"
 cask "gcloud-cli"
 cask "ghostty"
-cask "karabiner-elements"
 cask "kap"
+cask "karabiner-elements"
 cask "maccy"
 cask "obsidian"
 cask "pgadmin4"
 cask "raycast"
 cask "rectangle"
 cask "tableplus"
+
+# === Cursor / VS Code extensions ===
+vscode "anysphere.cursorpyright"
+vscode "cweijan.dbclient-jdbc"
+vscode "cweijan.vscode-mysql-client2"
+vscode "esbenp.prettier-vscode"
+vscode "golang.go"
+vscode "hashicorp.terraform"
+vscode "ms-python.debugpy"
+vscode "ms-python.python"
+vscode "openai.chatgpt"
+vscode "renesaarsoo.sql-formatter-vsc"
+
+# === Go tools ===
+go "github.com/golangci/golangci-lint/cmd/golangci-lint"
+go "go.uber.org/mock/mockgen"
+go "golang.org/x/tools/cmd/goimports"
+go "mvdan.cc/gofumpt"
+
+# === Rust tools ===
+cargo "diff-viewer"

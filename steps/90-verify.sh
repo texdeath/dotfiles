@@ -43,7 +43,8 @@ else
   command -v go >/dev/null 2>&1       && ok "go $(go version | awk '{print $3}')" || { warn "go が見つかりません"; errors=$((errors + 1)); }
   command -v python3 >/dev/null 2>&1  && ok "python $(python3 --version 2>&1 | awk '{print $2}')" || { warn "python3 が見つかりません"; errors=$((errors + 1)); }
   command -v node >/dev/null 2>&1     && ok "node $(node --version)" || { warn "node が見つかりません"; errors=$((errors + 1)); }
-  command -v volta >/dev/null 2>&1    && ok "volta"  || { warn "volta が見つかりません"; errors=$((errors + 1)); }
+  command -v yarn >/dev/null 2>&1     && ok "yarn $(yarn --version)" || { warn "yarn が見つかりません"; errors=$((errors + 1)); }
+  command -v codex >/dev/null 2>&1    && ok "codex"  || { warn "codex が見つかりません"; errors=$((errors + 1)); }
   command -v rustc >/dev/null 2>&1    && ok "rustc $(rustc --version | awk '{print $2}')" || { warn "rustc が見つかりません"; errors=$((errors + 1)); }
   command -v delta >/dev/null 2>&1    && ok "delta"  || { warn "delta が見つかりません"; errors=$((errors + 1)); }
   command -v lazygit >/dev/null 2>&1  && ok "lazygit" || { warn "lazygit が見つかりません"; errors=$((errors + 1)); }

@@ -1,11 +1,7 @@
-# mise (Go / Python ランタイム管理)
+# mise (Go / Python / Node.js / Yarn ランタイム管理)
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate zsh)"
 fi
-
-# Volta (Node.js 管理)
-export VOLTA_HOME="$HOME/.volta"
-export PATH="$VOLTA_HOME/bin:$PATH"
 
 # ghq
 export GHQ_ROOT="$HOME/ghq"
