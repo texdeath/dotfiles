@@ -22,7 +22,8 @@ ok "git (gitconfig, gitignore_global)"
 for d in fileops editor notion claude; do
   dry_link "$DOTFILES/bin/$d" "$HOME/bin/$d"
 done
-ok "bin (fileops, editor, notion, claude)"
+dry_link "$DOTFILES/bin/ai-tmux" "$HOME/bin/ai-tmux"
+ok "bin (fileops, editor, notion, claude, ai-tmux)"
 
 # secrets
 dry_link "$DOTFILES/secrets/bw-secret.sh" "$HOME/bin/bw-secret.sh"
