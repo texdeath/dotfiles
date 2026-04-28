@@ -22,6 +22,7 @@ for f in \
   "$HOME/.zsh/completions.zsh" \
   "$HOME/.zsh/aliases.zsh" \
   "$HOME/.zsh/functions.zsh" \
+  "$HOME/.zsh/orchestrate.zsh" \
   "$HOME/.zsh/prompt.zsh"
 do
   [[ -f "$f" ]] && source "$f"
