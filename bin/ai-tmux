@@ -26,6 +26,9 @@ Usage:
   ai-tmux review --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
   ai-tmux implement --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
   ai-tmux design --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
+  ai-tmux workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
+  ai-tmux workspace status [-n lines]
+  ai-tmux workspace report <workspace> [-n lines]
 
 Targets:
   current   current pane
@@ -33,6 +36,11 @@ Targets:
   codex     first pane that looks like Codex
   %1        tmux pane id
   main:1.2  tmux session:window.pane target
+
+Workspace profiles:
+  frontend  4 panes: devbox run dev / devbox run typecheck / devbox run test / logs
+  backend   4 panes: docker compose up (via .orchestrate/compose.args or devbox run compose:up) /
+            compose logs / compose ps / test
 
 Examples:
   ai-tmux new profile-driven-orchesrtrate
@@ -45,6 +53,10 @@ Examples:
   ai-tmux review --from claude --to codex "Review this plan before implementation."
   ai-tmux implement --from claude --to codex "Implement only the MVP scope."
   ai-tmux handoff --from codex --to claude --task design --dry-run
+  ai-tmux workspace start frontend ~/ghq/.../mvp-01-frontend-devbox --dry-run
+  ai-tmux workspace start backend ~/ghq/.../mvp-02-backend-devbox-wrapper
+  ai-tmux workspace status
+  ai-tmux workspace report mvp-01-frontend-devbox -n 100
 EOF
 }
 
@@ -840,6 +852,362 @@ cmd_handoff() {
   fi
 }
 
+workspace_profile_panes() {
+  local profile="$1"
+  case "$profile" in
+    frontend)
+      cat <<'EOF'
+dev|devbox run dev
+typecheck|devbox run typecheck
+test|devbox run test
+logs|tail -F .orchestrate/logs/*.log 2>/dev/null || (echo "no .orchestrate/logs/*.log; reading shell" && exec $SHELL -l)
+EOF
+      ;;
+    backend)
+      cat <<'EOF'
+compose-up|if [ -f .orchestrate/compose.args ]; then docker compose $(cat .orchestrate/compose.args) up; else devbox run compose:up; fi
+compose-logs|if [ -f .orchestrate/compose.args ]; then docker compose $(cat .orchestrate/compose.args) logs -f; else devbox run compose:logs; fi
+compose-ps|if [ -f .orchestrate/compose.args ]; then watch -n 5 'docker compose $(cat .orchestrate/compose.args) ps'; else devbox run compose:ps; fi
+test|devbox run test
+EOF
+      ;;
+    *)
+      die "unknown workspace profile: $profile (expected: frontend, backend)"
+      ;;
+  esac
+}
+
+workspace_validate_profile() {
+  case "$1" in
+    frontend|backend) return 0 ;;
+    *) die "unknown workspace profile: $1 (expected: frontend, backend)" ;;
+  esac
+}
+
+workspace_window_target() {
+  local session="$1"
+  local window_name="$2"
+  printf '%s:%s' "$session" "$window_name"
+}
+
+workspace_session_for_window() {
+  local window_target="$1"
+  printf '%s' "${window_target%%:*}"
+}
+
+workspace_default_session() {
+  local current
+  current="$(tmux display-message -p '#{session_name}' 2>/dev/null || true)"
+  if [[ -n "$current" ]]; then
+    echo "$current"
+    return
+  fi
+  current="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | head -n 1)"
+  [[ -n "$current" ]] || die "no tmux session is running; create one with 'ai-tmux new' first"
+  echo "$current"
+}
+
+cmd_workspace_start() {
+  local profile=""
+  local worktree=""
+  local session=""
+  local window_name=""
+  local dry_run="false"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --session)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        session="$2"
+        shift 2
+        ;;
+      --name|--window)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        window_name="$2"
+        shift 2
+        ;;
+      --dry-run)
+        dry_run="true"
+        shift
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ai-tmux workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
+
+Create a tmux window for a worktree and launch profile-specific panes.
+
+Profiles:
+  frontend  dev / typecheck / test / logs
+  backend   docker compose up / compose logs / compose ps / test
+            (uses .orchestrate/compose.args if present, else devbox run compose:*)
+
+Options:
+  --session name   target tmux session (default: current session)
+  --name window    window name (default: worktree basename)
+  --dry-run        print commands without executing tmux
+EOF
+        return
+        ;;
+      -*)
+        die "unknown option for workspace start: $1"
+        ;;
+      *)
+        if [[ -z "$profile" ]]; then
+          profile="$1"
+        elif [[ -z "$worktree" ]]; then
+          worktree="$1"
+        else
+          die "workspace start takes <profile> <worktree-path>; extra arg: $1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  [[ -n "$profile" ]] || die "workspace start: profile is required (frontend|backend)"
+  [[ -n "$worktree" ]] || die "workspace start: worktree-path is required"
+  workspace_validate_profile "$profile"
+
+  if [[ "$dry_run" != "true" ]]; then
+    [[ -d "$worktree" ]] || die "worktree path does not exist: $worktree"
+    worktree="$(cd "$worktree" && pwd)"
+  fi
+
+  if [[ -z "$window_name" ]]; then
+    window_name="$(basename "$worktree")"
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    if [[ -z "$session" ]]; then
+      session="<current-session>"
+    fi
+  else
+    need_tmux
+    [[ -n "$session" ]] || session="$(workspace_default_session)"
+  fi
+
+  local window_target
+  window_target="$(workspace_window_target "$session" "$window_name")"
+
+  local pane_specs
+  pane_specs="$(workspace_profile_panes "$profile")"
+
+  local -a names=()
+  local -a commands=()
+  local line name cmd
+  while IFS='|' read -r name cmd; do
+    [[ -z "$name" ]] && continue
+    names+=("$name")
+    commands+=("$cmd")
+  done <<<"$pane_specs"
+
+  local pane_count="${#names[@]}"
+  [[ "$pane_count" -ge 2 ]] || die "profile $profile produced no panes"
+
+  if [[ "$dry_run" == "true" ]]; then
+    printf '# ai-tmux workspace start %s %s (dry-run)\n' "$profile" "$worktree"
+    printf '# session=%s window=%s panes=%d\n' "$session" "$window_name" "$pane_count"
+    printf 'tmux new-window -t %q -n %q -c %q\n' "$session" "$window_name" "$worktree"
+    printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "# pane 0: ${names[0]}"
+    printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "${commands[0]}"
+    local i
+    for (( i=1; i<pane_count; i++ )); do
+      printf 'tmux split-window -t %q -c %q\n' "$window_target" "$worktree"
+      printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "# pane $i: ${names[$i]}"
+      printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "${commands[$i]}"
+    done
+    printf 'tmux select-layout -t %q tiled\n' "$window_target"
+    printf 'tmux select-pane -t %q.0\n' "$window_target"
+    return
+  fi
+
+  tmux new-window -t "$session" -n "$window_name" -c "$worktree"
+  tmux send-keys -t "$window_target" "# pane 0: ${names[0]}" Enter
+  tmux send-keys -t "$window_target" "${commands[0]}" Enter
+  local i
+  for (( i=1; i<pane_count; i++ )); do
+    tmux split-window -t "$window_target" -c "$worktree"
+    tmux send-keys -t "$window_target" "# pane $i: ${names[$i]}" Enter
+    tmux send-keys -t "$window_target" "${commands[$i]}" Enter
+  done
+  tmux select-layout -t "$window_target" tiled
+  tmux select-pane -t "${window_target}.0"
+
+  printf 'workspace started: %s (%s) at %s\n' "$window_name" "$profile" "$worktree"
+}
+
+workspace_window_profile_guess() {
+  local window="$1"
+  local panes
+  panes="$(tmux list-panes -t "$window" -F '#{pane_current_command}' 2>/dev/null | tr '\n' ' ')"
+  case " $panes " in
+    *" docker "*) echo "backend"; return ;;
+    *" compose "*) echo "backend"; return ;;
+  esac
+  local titles
+  titles="$(tmux list-panes -t "$window" -F '#{pane_title}' 2>/dev/null | tr '\n' ' ')"
+  case " $titles " in
+    *compose*) echo "backend"; return ;;
+    *typecheck*|*dev*|*pnpm*) echo "frontend"; return ;;
+  esac
+  echo "-"
+}
+
+cmd_workspace_status() {
+  local lines="$DEFAULT_LINES"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n|--lines)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        lines="$2"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ai-tmux workspace status [-n lines]
+
+List tmux windows in the current/all sessions and inspect each pane.
+EOF
+        return
+        ;;
+      *)
+        die "unknown option for workspace status: $1"
+        ;;
+    esac
+  done
+
+  is_positive_int "$lines" || die "line count must be a positive integer"
+  need_tmux
+
+  printf '%-20s %-9s %-5s %-12s %-12s %s\n' "WORKSPACE" "PROFILE" "PANES" "SESSION" "AGENT" "PATH"
+  local window_target name session_name profile pane_total label first_path
+  while IFS=$'\t' read -r window_target name session_name; do
+    profile="$(workspace_window_profile_guess "$window_target")"
+    pane_total="$(tmux list-panes -t "$window_target" -F '.' 2>/dev/null | wc -l | tr -d ' ')"
+    label="-"
+    while IFS= read -r pane; do
+      local lbl
+      lbl="$(pane_label "$pane")"
+      if [[ "$lbl" != "-" ]]; then
+        label="$lbl"
+        break
+      fi
+    done < <(tmux list-panes -t "$window_target" -F '#{pane_id}' 2>/dev/null)
+    first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
+    printf '%-20s %-9s %-5s %-12s %-12s %s\n' "$name" "$profile" "$pane_total" "$session_name" "$label" "$first_path"
+  done < <(tmux list-windows -a -F '#{session_name}:#{window_index}	#{window_name}	#{session_name}' 2>/dev/null)
+}
+
+workspace_resolve_window() {
+  local needle="$1"
+  local found=""
+  local window_target name session_name
+  while IFS=$'\t' read -r window_target name session_name; do
+    if [[ "$name" == "$needle" || "$window_target" == "$needle" ]]; then
+      found="$window_target"
+      break
+    fi
+  done < <(tmux list-windows -a -F '#{session_name}:#{window_index}	#{window_name}	#{session_name}' 2>/dev/null)
+  [[ -n "$found" ]] || die "workspace not found: $needle (run 'ai-tmux workspace status' to list)"
+  printf '%s' "$found"
+}
+
+cmd_workspace_report() {
+  local needle=""
+  local lines=80
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n|--lines)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        lines="$2"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ai-tmux workspace report <workspace> [-n lines]
+
+Emit a Markdown report for the given workspace (window name or session:index)
+that summarizes context and recent pane output. Default lines per pane: 80.
+EOF
+        return
+        ;;
+      -*)
+        die "unknown option for workspace report: $1"
+        ;;
+      *)
+        [[ -z "$needle" ]] || die "workspace report takes a single workspace argument"
+        needle="$1"
+        shift
+        ;;
+    esac
+  done
+
+  [[ -n "$needle" ]] || die "workspace report: workspace name is required"
+  is_positive_int "$lines" || die "line count must be a positive integer"
+  need_tmux
+
+  local window_target name session_name profile pane_total first_path timestamp
+  window_target="$(workspace_resolve_window "$needle")"
+  name="$(tmux display-message -p -t "$window_target" '#{window_name}')"
+  session_name="$(tmux display-message -p -t "$window_target" '#{session_name}')"
+  profile="$(workspace_window_profile_guess "$window_target")"
+  pane_total="$(tmux list-panes -t "$window_target" -F '.' 2>/dev/null | wc -l | tr -d ' ')"
+  first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
+  timestamp="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+  cat <<EOF
+# Workspace report: $name
+
+- workspace: $name
+- profile: $profile
+- session: $session_name
+- window: $window_target
+- pane count: $pane_total
+- cwd: $first_path
+- lines per pane: $lines
+- generated: $timestamp
+
+EOF
+
+  local pane
+  while IFS= read -r pane; do
+    digest_pane "$pane" "$lines"
+  done < <(tmux list-panes -t "$window_target" -F '#{pane_id}' 2>/dev/null)
+}
+
+cmd_workspace() {
+  local sub="${1:-}"
+  if [[ -z "$sub" || "$sub" == "-h" || "$sub" == "--help" ]]; then
+    cat <<'EOF'
+Usage:
+  ai-tmux workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
+  ai-tmux workspace status [-n lines]
+  ai-tmux workspace report <workspace> [-n lines]
+EOF
+    return
+  fi
+  shift
+  case "$sub" in
+    start)
+      cmd_workspace_start "$@"
+      ;;
+    status)
+      cmd_workspace_status "$@"
+      ;;
+    report)
+      cmd_workspace_report "$@"
+      ;;
+    *)
+      die "unknown workspace subcommand: $sub (expected: start, status, report)"
+      ;;
+  esac
+}
+
 main() {
   local command="${1:-help}"
   if [[ $# -gt 0 ]]; then
@@ -889,6 +1257,9 @@ main() {
     review|implement|design)
       need_tmux
       cmd_handoff "$command" "$@"
+      ;;
+    workspace|ws)
+      cmd_workspace "$@"
       ;;
     *)
       usage >&2
