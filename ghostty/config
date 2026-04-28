@@ -1,3 +1,6 @@
+# Theme
+theme = Blazer
+
 # Font
 font-size = 14
 
@@ -8,7 +11,9 @@ window-decoration = auto
 
 # Shell
 shell-integration = zsh
+command = /bin/zsh -lc 'exec tmux new-session -A -s main'
 
 # Misc
 copy-on-select = clipboard
 mouse-hide-while-typing = true
+macos-option-as-alt = true

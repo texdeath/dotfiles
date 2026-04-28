@@ -38,6 +38,10 @@ dry_mkdir "$LAZYGIT_DST"
 dry_link "$DOTFILES/lazygit/config.yml" "$LAZYGIT_DST/config.yml"
 ok "lazygit"
 
+# tmux
+dry_link "$DOTFILES/tmux/tmux.conf" "$HOME/.tmux.conf"
+ok "tmux"
+
 # git hooks
 if [ "$DRY_RUN" = true ]; then
   ok "git hooks (.githooks/)"

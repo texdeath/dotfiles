@@ -23,6 +23,7 @@ if [ "$DRY_RUN" = true ]; then
     "$DOTFILES/secrets/bw-secret.sh"
     "$DOTFILES/.tool-versions"
     "$DOTFILES/lazygit/config.yml"
+    "$DOTFILES/tmux/tmux.conf"
     "$DOTFILES/karabiner/karabiner.json"
     "$DOTFILES/ghostty/config"
     "$DOTFILES/macos/defaults.sh"
@@ -48,9 +49,11 @@ else
   command -v rustc >/dev/null 2>&1    && ok "rustc $(rustc --version | awk '{print $2}')" || { warn "rustc が見つかりません"; errors=$((errors + 1)); }
   command -v delta >/dev/null 2>&1    && ok "delta"  || { warn "delta が見つかりません"; errors=$((errors + 1)); }
   command -v lazygit >/dev/null 2>&1  && ok "lazygit" || { warn "lazygit が見つかりません"; errors=$((errors + 1)); }
+  command -v tmux >/dev/null 2>&1     && ok "tmux"   || { warn "tmux が見つかりません"; errors=$((errors + 1)); }
   command -v direnv >/dev/null 2>&1   && ok "direnv" || { warn "direnv が見つかりません"; errors=$((errors + 1)); }
   command -v zoxide >/dev/null 2>&1   && ok "zoxide" || { warn "zoxide が見つかりません"; errors=$((errors + 1)); }
   [ -L "$HOME/.zshrc" ]              && ok ".zshrc リンク済み" || { warn ".zshrc 未リンク"; errors=$((errors + 1)); }
   [ -L "$HOME/.gitconfig" ]          && ok ".gitconfig リンク済み" || { warn ".gitconfig 未リンク"; errors=$((errors + 1)); }
   [ -L "$HOME/.tool-versions" ]      && ok ".tool-versions リンク済み" || { warn ".tool-versions 未リンク"; errors=$((errors + 1)); }
+  [ -L "$HOME/.tmux.conf" ]          && ok ".tmux.conf リンク済み" || { warn ".tmux.conf 未リンク"; errors=$((errors + 1)); }
 fi

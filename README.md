@@ -57,7 +57,7 @@ graph TB
 | ステップ | 内容 |
 |---------|------|
 | 1 | Xcode Command Line Tools |
-| 2 | シンボリックリンク（zsh, git, bin, lazygit, bw-secret.sh） |
+| 2 | シンボリックリンク（zsh, git, bin, lazygit, tmux, bw-secret.sh） |
 | 3 | Homebrew + `brew bundle` |
 | 4 | 言語ランタイム（mise + Rust） |
 | 5 | Cursor 拡張機能・設定 |
@@ -76,6 +76,7 @@ graph TB
 | bw-secret.sh | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
 | .tool-versions | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
 | lazygit | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
+| tmux | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
 | Ghostty | symlink | 上書き（冪等） | リンク先を編集 → 即反映 |
 | Karabiner | copy | 上書き（ローカル変更は消える） | ローカルで編集後、リポジトリに戻す |
 | Automator | copy | 上書き（ローカル変更は消える） | ローカルで編集後、リポジトリに戻す |
@@ -119,6 +120,7 @@ dotfiles/
 ├── karabiner/            # Karabiner Elements 設定
 ├── ghostty/              # Ghostty ターミナル設定
 ├── lazygit/              # lazygit 設定
+├── tmux/                 # tmux 設定
 ├── macos/                # macOS defaults
 ├── automator/            # Automator ワークフロー
 ├── .github/workflows/    # CI（dry-run + public 境界チェック）
