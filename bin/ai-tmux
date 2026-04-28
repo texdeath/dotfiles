@@ -978,17 +978,16 @@ EOF
     window_name="$(basename "$worktree")"
   fi
 
+  local window_target
   if [[ "$dry_run" == "true" ]]; then
     if [[ -z "$session" ]]; then
       session="<current-session>"
     fi
+    window_target="<window-id>"
   else
     need_tmux
     [[ -n "$session" ]] || session="$(workspace_default_session)"
   fi
-
-  local window_target
-  window_target="$(workspace_window_target "$session" "$window_name")"
 
   local pane_specs
   pane_specs="$(workspace_profile_panes "$profile")"
@@ -1008,7 +1007,8 @@ EOF
   if [[ "$dry_run" == "true" ]]; then
     printf '# ai-tmux workspace start %s %s (dry-run)\n' "$profile" "$worktree"
     printf '# session=%s window=%s panes=%d\n' "$session" "$window_name" "$pane_count"
-    printf 'tmux new-window -t %q -n %q -c %q\n' "$session" "$window_name" "$worktree"
+    printf 'window_target="$(tmux new-window -P -F %s -t %q -n %q -c %q)"\n' "'#{window_id}'" "$session" "$window_name" "$worktree"
+    printf 'tmux set-option -w -t %q %s %q\n' "$window_target" "@workspace_profile" "$profile"
     printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "# pane 0: ${names[0]}"
     printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "${commands[0]}"
     local i
@@ -1022,7 +1022,8 @@ EOF
     return
   fi
 
-  tmux new-window -t "$session" -n "$window_name" -c "$worktree"
+  window_target="$(tmux new-window -P -F '#{window_id}' -t "$session" -n "$window_name" -c "$worktree")"
+  tmux set-option -w -t "$window_target" '@workspace_profile' "$profile"
   tmux send-keys -t "$window_target" "# pane 0: ${names[0]}" Enter
   tmux send-keys -t "$window_target" "${commands[0]}" Enter
   local i
@@ -1037,21 +1038,15 @@ EOF
   printf 'workspace started: %s (%s) at %s\n' "$window_name" "$profile" "$worktree"
 }
 
-workspace_window_profile_guess() {
+workspace_window_profile_from_meta() {
   local window="$1"
-  local panes
-  panes="$(tmux list-panes -t "$window" -F '#{pane_current_command}' 2>/dev/null | tr '\n' ' ')"
-  case " $panes " in
-    *" docker "*) echo "backend"; return ;;
-    *" compose "*) echo "backend"; return ;;
-  esac
-  local titles
-  titles="$(tmux list-panes -t "$window" -F '#{pane_title}' 2>/dev/null | tr '\n' ' ')"
-  case " $titles " in
-    *compose*) echo "backend"; return ;;
-    *typecheck*|*dev*|*pnpm*) echo "frontend"; return ;;
-  esac
-  echo "-"
+  local profile
+  profile="$(tmux show-option -wv -t "$window" '@workspace_profile' 2>/dev/null)"
+  if [[ -n "$profile" ]]; then
+    printf '%s' "$profile"
+  else
+    printf '%s' "-"
+  fi
 }
 
 cmd_workspace_status() {
@@ -1082,37 +1077,33 @@ EOF
   is_positive_int "$lines" || die "line count must be a positive integer"
   need_tmux
 
-  printf '%-20s %-9s %-5s %-12s %-12s %s\n' "WORKSPACE" "PROFILE" "PANES" "SESSION" "AGENT" "PATH"
-  local window_target name session_name profile pane_total label first_path
+  printf '%-20s %-9s %-5s %-12s %-15s %s\n' "WORKSPACE" "PROFILE" "PANES" "SESSION" "CURRENT_CMD" "PATH"
+  local window_target name session_name profile pane_total current_cmd first_path
   while IFS=$'\t' read -r window_target name session_name; do
-    profile="$(workspace_window_profile_guess "$window_target")"
+    profile="$(workspace_window_profile_from_meta "$window_target")"
+    [[ "$profile" == "-" ]] && continue
     pane_total="$(tmux list-panes -t "$window_target" -F '.' 2>/dev/null | wc -l | tr -d ' ')"
-    label="-"
-    while IFS= read -r pane; do
-      local lbl
-      lbl="$(pane_label "$pane")"
-      if [[ "$lbl" != "-" ]]; then
-        label="$lbl"
-        break
-      fi
-    done < <(tmux list-panes -t "$window_target" -F '#{pane_id}' 2>/dev/null)
+    current_cmd="$(tmux list-panes -t "$window_target" -F '#{pane_current_command}' 2>/dev/null | grep -v '^$' | head -n 1)"
+    current_cmd="${current_cmd:--}"
     first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
-    printf '%-20s %-9s %-5s %-12s %-12s %s\n' "$name" "$profile" "$pane_total" "$session_name" "$label" "$first_path"
+    printf '%-20s %-9s %-5s %-12s %-15s %s\n' "$name" "$profile" "$pane_total" "$session_name" "$current_cmd" "$first_path"
   done < <(tmux list-windows -a -F '#{session_name}:#{window_index}	#{window_name}	#{session_name}' 2>/dev/null)
 }
 
 workspace_resolve_window() {
   local needle="$1"
-  local found=""
+  local -a matches=()
   local window_target name session_name
   while IFS=$'\t' read -r window_target name session_name; do
     if [[ "$name" == "$needle" || "$window_target" == "$needle" ]]; then
-      found="$window_target"
-      break
+      matches+=("$window_target")
     fi
   done < <(tmux list-windows -a -F '#{session_name}:#{window_index}	#{window_name}	#{session_name}' 2>/dev/null)
-  [[ -n "$found" ]] || die "workspace not found: $needle (run 'ai-tmux workspace status' to list)"
-  printf '%s' "$found"
+  case "${#matches[@]}" in
+    0) die "workspace not found: $needle (run 'ai-tmux workspace status' to list)" ;;
+    1) printf '%s' "${matches[0]}" ;;
+    *) die "workspace name is ambiguous: $needle (use session:index): ${matches[*]}" ;;
+  esac
 }
 
 cmd_workspace_report() {
@@ -1155,7 +1146,7 @@ EOF
   window_target="$(workspace_resolve_window "$needle")"
   name="$(tmux display-message -p -t "$window_target" '#{window_name}')"
   session_name="$(tmux display-message -p -t "$window_target" '#{session_name}')"
-  profile="$(workspace_window_profile_guess "$window_target")"
+  profile="$(workspace_window_profile_from_meta "$window_target")"
   pane_total="$(tmux list-panes -t "$window_target" -F '.' 2>/dev/null | wc -l | tr -d ' ')"
   first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
   timestamp="$(date '+%Y-%m-%d %H:%M:%S %Z')"
