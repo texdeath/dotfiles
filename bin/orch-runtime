@@ -43,7 +43,7 @@ Workspace profiles:
             compose logs / compose ps / test
 
 Examples:
-  orch-runtime new profile-driven-orchesrtrate
+  orch-runtime new profile-driven-orchestrate
   orch-runtime new --print scratch
   orch-runtime panes
   orch-runtime status
