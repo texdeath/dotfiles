@@ -22,8 +22,23 @@ ok "git (gitconfig, gitignore_global)"
 for d in fileops editor notion claude; do
   dry_link "$DOTFILES/bin/$d" "$HOME/bin/$d"
 done
-dry_link "$DOTFILES/bin/ai-tmux" "$HOME/bin/ai-tmux"
-ok "bin (fileops, editor, notion, claude, ai-tmux)"
+# 旧名 symlink (~/bin/ai-tmux) が dotfiles-owned (= $DOTFILES/bin/ai-tmux か
+# rename 後の $DOTFILES/bin/orch-runtime を指す) の場合のみ削除する。
+# user 自身が作った別ターゲットへの symlink は触らない。
+if [ -L "$HOME/bin/ai-tmux" ]; then
+  STALE_TARGET="$(readlink "$HOME/bin/ai-tmux" 2>/dev/null || true)"
+  if [ "$STALE_TARGET" = "$DOTFILES/bin/ai-tmux" ] || [ "$STALE_TARGET" = "$DOTFILES/bin/orch-runtime" ]; then
+    if [ "$DRY_RUN" = true ]; then
+      ok "remove stale symlink ~/bin/ai-tmux -> $STALE_TARGET (dry-run)"
+    else
+      rm -f "$HOME/bin/ai-tmux"
+    fi
+  else
+    ok "skip ~/bin/ai-tmux (target=$STALE_TARGET, not dotfiles-owned)"
+  fi
+fi
+dry_link "$DOTFILES/bin/orch-runtime" "$HOME/bin/orch-runtime"
+ok "bin (fileops, editor, notion, claude, orch-runtime)"
 
 # secrets
 dry_link "$DOTFILES/secrets/bw-secret.sh" "$HOME/bin/bw-secret.sh"

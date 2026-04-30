@@ -4,31 +4,31 @@
 set -euo pipefail
 
 DEFAULT_LINES=120
-BUFFER_NAME="ai-tmux-share"
+BUFFER_NAME="orch-runtime-share"
 
 die() {
-  echo "ai-tmux: $*" >&2
+  echo "orch-runtime: $*" >&2
   exit 1
 }
 
 usage() {
   cat <<'EOF'
 Usage:
-  ai-tmux new [--print] [session]
-  ai-tmux panes
-  ai-tmux status [pane|claude|codex|all] [-n lines]
-  ai-tmux watch [pane|claude|codex|all] [-n lines] [-i seconds] [--states asking,error] [--no-notify] [--once]
-  ai-tmux digest [pane|claude|codex|all] [-n lines] [note...]
-  ai-tmux focus <pane|claude|codex>
-  ai-tmux capture [pane|claude|codex] [-n lines]
-  ai-tmux send [--no-enter] <pane|claude|codex> [message...]
-  ai-tmux handoff --from <pane|claude|codex> --to <pane|claude|codex> [--task context|review|implement|design] [-n lines] [--dry-run] [note...]
-  ai-tmux review --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
-  ai-tmux implement --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
-  ai-tmux design --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
-  ai-tmux workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
-  ai-tmux workspace status [-n lines]
-  ai-tmux workspace report <workspace> [-n lines]
+  orch-runtime new [--print] [session]
+  orch-runtime panes
+  orch-runtime status [pane|claude|codex|all] [-n lines]
+  orch-runtime watch [pane|claude|codex|all] [-n lines] [-i seconds] [--states asking,error] [--no-notify] [--once]
+  orch-runtime digest [pane|claude|codex|all] [-n lines] [note...]
+  orch-runtime focus <pane|claude|codex>
+  orch-runtime capture [pane|claude|codex] [-n lines]
+  orch-runtime send [--no-enter] <pane|claude|codex> [message...]
+  orch-runtime handoff --from <pane|claude|codex> --to <pane|claude|codex> [--task context|review|implement|design] [-n lines] [--dry-run] [note...]
+  orch-runtime review --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
+  orch-runtime implement --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
+  orch-runtime design --from <pane|claude|codex> --to <pane|claude|codex> [-n lines] [note...]
+  orch-runtime workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
+  orch-runtime workspace status [-n lines]
+  orch-runtime workspace report <workspace> [-n lines]
 
 Targets:
   current   current pane
@@ -43,20 +43,20 @@ Workspace profiles:
             compose logs / compose ps / test
 
 Examples:
-  ai-tmux new profile-driven-orchesrtrate
-  ai-tmux new --print scratch
-  ai-tmux panes
-  ai-tmux status
-  ai-tmux watch all
-  ai-tmux digest claude -n 80 "Summarize where Claude is blocked."
-  ai-tmux focus claude
-  ai-tmux review --from claude --to codex "Review this plan before implementation."
-  ai-tmux implement --from claude --to codex "Implement only the MVP scope."
-  ai-tmux handoff --from codex --to claude --task design --dry-run
-  ai-tmux workspace start frontend ~/ghq/.../mvp-01-frontend-devbox --dry-run
-  ai-tmux workspace start backend ~/ghq/.../mvp-02-backend-devbox-wrapper
-  ai-tmux workspace status
-  ai-tmux workspace report mvp-01-frontend-devbox -n 100
+  orch-runtime new profile-driven-orchesrtrate
+  orch-runtime new --print scratch
+  orch-runtime panes
+  orch-runtime status
+  orch-runtime watch all
+  orch-runtime digest claude -n 80 "Summarize where Claude is blocked."
+  orch-runtime focus claude
+  orch-runtime review --from claude --to codex "Review this plan before implementation."
+  orch-runtime implement --from claude --to codex "Implement only the MVP scope."
+  orch-runtime handoff --from codex --to claude --task design --dry-run
+  orch-runtime workspace start frontend ~/ghq/.../mvp-01-frontend-devbox --dry-run
+  orch-runtime workspace start backend ~/ghq/.../mvp-02-backend-devbox-wrapper
+  orch-runtime workspace status
+  orch-runtime workspace report mvp-01-frontend-devbox -n 100
 EOF
 }
 
@@ -157,7 +157,7 @@ resolve_pane() {
   done < <(tmux list-panes -a -F '#{pane_id}	#{pane_current_command}	#{pane_title}')
 
   case "${#matches[@]}" in
-    0) die "no pane matching '$target' was found; run 'ai-tmux panes' and use a pane id" ;;
+    0) die "no pane matching '$target' was found; run 'orch-runtime panes' and use a pane id" ;;
     1) echo "${matches[0]}" ;;
     *) die "multiple '$target' panes found: ${matches[*]}; use a pane id" ;;
   esac
@@ -343,7 +343,7 @@ cmd_new() {
       -h|--help)
         cat <<'EOF'
 Usage:
-  ai-tmux new [--print] [session]
+  orch-runtime new [--print] [session]
 
 Open a Ghostty window attached to a tmux session.
 If session is omitted, a timestamped work-* session is created.
@@ -481,7 +481,7 @@ cmd_watch() {
       -h|--help)
         cat <<'EOF'
 Usage:
-  ai-tmux watch [pane|claude|codex|all] [-n lines] [-i seconds] [--states asking,error] [--no-notify] [--once]
+  orch-runtime watch [pane|claude|codex|all] [-n lines] [-i seconds] [--states asking,error] [--no-notify] [--once]
 
 Watch tmux panes and notify on state changes into asking or error.
 EOF
@@ -503,11 +503,11 @@ EOF
   is_positive_int "$interval" || die "interval must be a positive integer"
   need_tmux
 
-  previous="$(mktemp "${TMPDIR:-/tmp}/ai-tmux-watch-prev.XXXXXX")"
-  current="$(mktemp "${TMPDIR:-/tmp}/ai-tmux-watch-current.XXXXXX")"
-  AI_TMUX_WATCH_PREVIOUS="$previous"
-  AI_TMUX_WATCH_CURRENT="$current"
-  trap 'rm -f "$AI_TMUX_WATCH_PREVIOUS" "$AI_TMUX_WATCH_CURRENT"' EXIT
+  previous="$(mktemp "${TMPDIR:-/tmp}/orch-runtime-watch-prev.XXXXXX")"
+  current="$(mktemp "${TMPDIR:-/tmp}/orch-runtime-watch-current.XXXXXX")"
+  ORCH_RUNTIME_WATCH_PREVIOUS="$previous"
+  ORCH_RUNTIME_WATCH_CURRENT="$current"
+  trap 'rm -f "$ORCH_RUNTIME_WATCH_PREVIOUS" "$ORCH_RUNTIME_WATCH_CURRENT"' EXIT
 
   printf 'Watching %s every %ss. Notifications: %s (%s). Press Ctrl-C to stop.\n' "$target" "$interval" "$notify" "$notify_states"
 
@@ -525,7 +525,7 @@ EOF
           if [[ -n "$last" ]]; then
             message="$message: $last"
           fi
-          send_notification "ai-tmux: $state" "$message"
+          send_notification "orch-runtime: $state" "$message"
         fi
       fi
     done < "$current"
@@ -903,7 +903,7 @@ workspace_default_session() {
     return
   fi
   current="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | head -n 1)"
-  [[ -n "$current" ]] || die "no tmux session is running; create one with 'ai-tmux new' first"
+  [[ -n "$current" ]] || die "no tmux session is running; create one with 'orch-runtime new' first"
   echo "$current"
 }
 
@@ -933,7 +933,7 @@ cmd_workspace_start() {
       -h|--help)
         cat <<'EOF'
 Usage:
-  ai-tmux workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
+  orch-runtime workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
 
 Create a tmux window for a worktree and launch profile-specific panes.
 
@@ -1005,7 +1005,7 @@ EOF
   [[ "$pane_count" -ge 2 ]] || die "profile $profile produced no panes"
 
   if [[ "$dry_run" == "true" ]]; then
-    printf '# ai-tmux workspace start %s %s (dry-run)\n' "$profile" "$worktree"
+    printf '# orch-runtime workspace start %s %s (dry-run)\n' "$profile" "$worktree"
     printf '# session=%s window=%s panes=%d\n' "$session" "$window_name" "$pane_count"
     printf 'window_target="$(tmux new-window -P -F %s -t %q -n %q -c %q)"\n' "'#{window_id}'" "$session" "$window_name" "$worktree"
     printf 'tmux set-option -w -t %q %s %q\n' "$window_target" "@workspace_profile" "$profile"
@@ -1062,7 +1062,7 @@ cmd_workspace_status() {
       -h|--help)
         cat <<'EOF'
 Usage:
-  ai-tmux workspace status [-n lines]
+  orch-runtime workspace status [-n lines]
 
 List tmux windows in the current/all sessions and inspect each pane.
 EOF
@@ -1100,7 +1100,7 @@ workspace_resolve_window() {
     fi
   done < <(tmux list-windows -a -F '#{session_name}:#{window_index}	#{window_name}	#{session_name}' 2>/dev/null)
   case "${#matches[@]}" in
-    0) die "workspace not found: $needle (run 'ai-tmux workspace status' to list)" ;;
+    0) die "workspace not found: $needle (run 'orch-runtime workspace status' to list)" ;;
     1) printf '%s' "${matches[0]}" ;;
     *) die "workspace name is ambiguous: $needle (use session:index): ${matches[*]}" ;;
   esac
@@ -1120,7 +1120,7 @@ cmd_workspace_report() {
       -h|--help)
         cat <<'EOF'
 Usage:
-  ai-tmux workspace report <workspace> [-n lines]
+  orch-runtime workspace report <workspace> [-n lines]
 
 Emit a Markdown report for the given workspace (window name or session:index)
 that summarizes context and recent pane output. Default lines per pane: 80.
@@ -1176,9 +1176,9 @@ cmd_workspace() {
   if [[ -z "$sub" || "$sub" == "-h" || "$sub" == "--help" ]]; then
     cat <<'EOF'
 Usage:
-  ai-tmux workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
-  ai-tmux workspace status [-n lines]
-  ai-tmux workspace report <workspace> [-n lines]
+  orch-runtime workspace start <frontend|backend> <worktree-path> [--session name] [--name window] [--dry-run]
+  orch-runtime workspace status [-n lines]
+  orch-runtime workspace report <workspace> [-n lines]
 EOF
     return
   fi

@@ -20,7 +20,7 @@ if [ "$DRY_RUN" = true ]; then
     "$DOTFILES/bin/editor"
     "$DOTFILES/bin/notion"
     "$DOTFILES/bin/claude"
-    "$DOTFILES/bin/ai-tmux"
+    "$DOTFILES/bin/orch-runtime"
     "$DOTFILES/secrets/bw-secret.sh"
     "$DOTFILES/.tool-versions"
     "$DOTFILES/lazygit/config.yml"
