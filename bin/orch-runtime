@@ -991,8 +991,11 @@ panes.each_with_index do |pane, idx|
       exit 2
     end
     pane_env.each do |k, v|
-      unless k.is_a?(String) && !k.empty?
-        warn "orch-runtime: runtime.panes[#{idx}].env keys must be non-empty strings"
+      # Enforce POSIX/C identifier shape so the eventual `export $key=...`
+      # cannot be reinterpreted as additional shell syntax. Non-empty alone
+      # would let `FOO-BAR` or names with metacharacters slip through.
+      unless k.is_a?(String) && k.match?(/\A[A-Za-z_][A-Za-z0-9_]*\z/)
+        warn "orch-runtime: runtime.panes[#{idx}].env keys must match [A-Za-z_][A-Za-z0-9_]*"
         exit 2
       end
       pane_env_hash[k] = v.to_s
@@ -1220,6 +1223,12 @@ EOF
   fi
   if [[ "$rc" -eq 2 ]]; then
     die "workspace start: profile '$profile' has invalid runtime.panes (see stderr above)"
+  fi
+  # Any other non-zero rc (e.g. ruby missing → 127, unexpected parser failure)
+  # must not fall through to the empty-pane_specs graceful-fallback branch:
+  # that would silently turn a real load failure into a no-op exit 0.
+  if [[ "$rc" -ne 0 ]]; then
+    die "workspace start: failed to load runtime.panes for profile '$profile' (rc=$rc)"
   fi
 
   if [[ -z "$pane_specs" ]]; then
