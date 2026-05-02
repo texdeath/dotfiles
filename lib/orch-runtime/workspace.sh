@@ -6,6 +6,7 @@ workspace_resolve_loader() {
   #   1. $ORCHESTRATE_LOAD_PROFILE  (env override, absolute path)
   #   2. command -v load-profile.sh (PATH discovery)
   #   3. ~/.claude/orchestrate/bin/load-profile.sh (canonical install location)
+  #   4. ~/bin/orchestrate/load-profile.sh (local user install)
   # Echoes the resolved path on success, returns 1 on failure.
   if [[ -n "${ORCHESTRATE_LOAD_PROFILE:-}" ]]; then
     if [[ -x "$ORCHESTRATE_LOAD_PROFILE" ]]; then
@@ -24,6 +25,30 @@ workspace_resolve_loader() {
 
   local default_path="$HOME/.claude/orchestrate/bin/load-profile.sh"
   if [[ -x "$default_path" ]]; then
+    printf '%s' "$default_path"
+    return 0
+  fi
+
+  default_path="$HOME/bin/orchestrate/load-profile.sh"
+  if [[ -x "$default_path" ]]; then
+    printf '%s' "$default_path"
+    return 0
+  fi
+
+  return 1
+}
+
+workspace_resolve_profiles_dir() {
+  # Resolve the profile yaml directory used when the loader's default
+  # ~/.claude/orchestrate/profiles has not been installed yet.
+  if [[ -n "${ORCHESTRATE_PROFILES_DIR:-}" && -d "$ORCHESTRATE_PROFILES_DIR" ]]; then
+    printf '%s' "$ORCHESTRATE_PROFILES_DIR"
+    return 0
+  fi
+
+  local default_path
+  default_path="$HOME/.claude/orchestrate/profiles"
+  if [[ -d "$default_path" ]]; then
     printf '%s' "$default_path"
     return 0
   fi
@@ -50,11 +75,19 @@ workspace_profile_panes() {
   local profile="$1"
   local worktree="$2"
   local loader
+  local profiles_dir
   loader="$(workspace_resolve_loader)" || return 1
+  profiles_dir="$(workspace_resolve_profiles_dir 2>/dev/null || true)"
 
   local profile_json
-  if ! profile_json="$("$loader" "$profile" --feature-path "$worktree" 2>/dev/null)"; then
-    return 1
+  if [[ -n "$profiles_dir" && -z "${ORCHESTRATE_PROFILES_DIR:-}" ]]; then
+    if ! profile_json="$(ORCHESTRATE_PROFILES_DIR="$profiles_dir" "$loader" "$profile" --feature-path "$worktree" 2>/dev/null)"; then
+      return 1
+    fi
+  else
+    if ! profile_json="$("$loader" "$profile" --feature-path "$worktree" 2>/dev/null)"; then
+      return 1
+    fi
   fi
 
   ruby -rjson - "$profile_json" "$worktree" <<'RUBY'
@@ -551,32 +584,45 @@ EOF
   need_tmux
 
   local window_target name session_name profile pane_total first_path timestamp
+  local branch
   window_target="$(workspace_resolve_window "$needle")"
   name="$(tmux display-message -p -t "$window_target" '#{window_name}')"
   session_name="$(tmux display-message -p -t "$window_target" '#{session_name}')"
   profile="$(workspace_window_profile_from_meta "$window_target")"
   pane_total="$(tmux list-panes -t "$window_target" -F '.' 2>/dev/null | wc -l | tr -d ' ')"
   first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
+  branch="$(workspace_git_branch "$first_path")"
   timestamp="$(date '+%Y-%m-%d %H:%M:%S %Z')"
 
   cat <<EOF
-# Workspace report: $name
+# Runtime Report: $name
+
+## Summary
 
 - workspace: $name
 - profile: $profile
 - session: $session_name
 - window: $window_target
-- pane count: $pane_total
-- cwd: $first_path
-- lines per pane: $lines
-- generated: $timestamp
+- pane_count: $pane_total
+- worktree: $first_path
+- branch: $branch
+- lines_per_pane: $lines
+- generated_at: $timestamp
+
+## Agent Handoff
+
+- Treat this report as the runtime snapshot for implementation or review.
+- Start with panes in \`error\` or \`asking\` state, then inspect related URLs and logs.
+- After a fix, run this command again and compare the Summary, Pane Summary, and Recent Error Signals sections.
 
 EOF
 
-  local pane
-  while IFS= read -r pane; do
-    digest_pane "$pane" "$lines"
-  done < <(tmux list-panes -t "$window_target" -F '#{pane_id}' 2>/dev/null)
+  workspace_report_runtime_links "$first_path"
+  workspace_report_runtime_env "$first_path"
+  workspace_report_docker_compose "$first_path"
+  workspace_report_pane_summary "$window_target" "$lines"
+  workspace_report_error_signals "$window_target" "$lines"
+  workspace_report_pane_details "$window_target" "$lines"
 }
 
 cmd_workspace() {

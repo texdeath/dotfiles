@@ -21,6 +21,8 @@ source "$ORCH_RUNTIME_LIB_DIR/common.sh"
 source "$ORCH_RUNTIME_LIB_DIR/panes.sh"
 # shellcheck source=../lib/orch-runtime/commands.sh
 source "$ORCH_RUNTIME_LIB_DIR/commands.sh"
+# shellcheck source=../lib/orch-runtime/report.sh
+source "$ORCH_RUNTIME_LIB_DIR/report.sh"
 # shellcheck source=../lib/orch-runtime/workspace.sh
 source "$ORCH_RUNTIME_LIB_DIR/workspace.sh"
 # shellcheck source=../lib/orch-runtime/main.sh
