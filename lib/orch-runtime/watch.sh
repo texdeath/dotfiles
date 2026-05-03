@@ -3,6 +3,7 @@
 
 WORKSPACE_WATCH_DEFAULT_INTERVAL=5
 WORKSPACE_WATCH_DEFAULT_STALE_SECONDS=300
+WORKSPACE_WATCH_DEFAULT_COMPOSE_TIMEOUT=8
 
 workspace_watch_usage() {
   cat <<'EOF'
@@ -180,10 +181,33 @@ workspace_watch_root_from_window() {
   done < <(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null)
 }
 
+workspace_watch_run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+    return
+  fi
+
+  local command_pid timer_pid rc=0
+  "$@" &
+  command_pid=$!
+  (
+    sleep "$seconds"
+    kill "$command_pid" 2>/dev/null || true
+  ) &
+  timer_pid=$!
+
+  wait "$command_pid" || rc=$?
+  kill "$timer_pid" 2>/dev/null || true
+  wait "$timer_pid" 2>/dev/null || true
+  return "$rc"
+}
+
 workspace_watch_compose_signal() {
   local worktree="$1"
   local args_file="$worktree/.orchestrate/compose.args"
-  local compose_output compose_rc status detail
+  local compose_output compose_rc status detail timeout_seconds
 
   [[ -n "$worktree" && -f "$args_file" ]] || return 0
 
@@ -192,12 +216,20 @@ workspace_watch_compose_signal() {
     return
   fi
 
+  timeout_seconds="${ORCH_RUNTIME_WATCH_COMPOSE_TIMEOUT:-$WORKSPACE_WATCH_DEFAULT_COMPOSE_TIMEOUT}"
+  is_positive_int "$timeout_seconds" || timeout_seconds="$WORKSPACE_WATCH_DEFAULT_COMPOSE_TIMEOUT"
+
   compose_rc=0
   compose_output="$(
-    cd "$worktree" || exit 1
-    # shellcheck disable=SC2046
-    docker compose $(cat "$args_file") ps 2>&1
+    workspace_watch_run_with_timeout "$timeout_seconds" bash -c '
+      cd "$1" || exit 1
+      # shellcheck disable=SC2046
+      docker compose $(cat "$2") ps
+    ' _ "$worktree" "$args_file" 2>&1
   )" || compose_rc=$?
+  if [[ "$compose_rc" -ne 0 && -z "$compose_output" ]]; then
+    compose_output="docker compose ps timed out after ${timeout_seconds}s or exited with $compose_rc"
+  fi
 
   if [[ "$compose_rc" -ne 0 ]]; then
     status="alert"

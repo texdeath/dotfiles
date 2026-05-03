@@ -33,4 +33,11 @@ screen=$'docker compose up\nservice api unhealthy'
 status="$(workspace_watch_pane_status "compose" "pane" "working" "0" "true" "$screen" "service api unhealthy")"
 [[ "$status" == stale$'\t'* ]] || fail "stale compose pane should report stale: $status"
 
+started="$(date '+%s')"
+if workspace_watch_run_with_timeout 1 bash -c 'sleep 3' >/dev/null 2>&1; then
+  fail "timeout helper unexpectedly succeeded"
+fi
+elapsed=$(( $(date '+%s') - started ))
+[[ "$elapsed" -lt 3 ]] || fail "timeout helper did not stop command quickly"
+
 echo "ok"

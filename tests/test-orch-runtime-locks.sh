@@ -45,6 +45,14 @@ cmd_lock release gpu 0 --worktree "$worktree_a" >"$TMP_ROOT/release.out"
 [[ ! -d "$path" ]] || fail "lock directory still exists after release"
 grep -q "released: gpu:0" "$TMP_ROOT/release.out" || fail "release output missing target"
 
+path="$(lock_acquire_one "gpu" "1" "workspace-a" "processor" "$worktree_a" "@missing-window")"
+assert_eq "stale" "$(lock_status "$path")" "missing-window lock status"
+same_path="$(lock_acquire_one "gpu" "1" "workspace-a" "processor" "$worktree_a" "")"
+assert_eq "$path" "$same_path" "same-worktree reacquire path"
+assert_eq "active" "$(lock_status "$same_path")" "same-worktree reacquire status"
+assert_eq "" "$(lock_read_field "$same_path" window)" "same-worktree reacquire window metadata"
+cmd_lock release gpu 1 --worktree "$worktree_a" >/dev/null
+
 stale_worktree="$TMP_ROOT/stale-worktree"
 mkdir -p "$stale_worktree"
 stale_path="$(lock_acquire_one "emulator-port" "8086" "stale-workspace" "backend" "$stale_worktree" "")"

@@ -32,7 +32,7 @@ Usage:
   orch-runtime lock list [--worktree path]
   orch-runtime lock check <type> <id>
   orch-runtime lock acquire <type> <id> [--workspace name] [--profile id] [--worktree path]
-  orch-runtime lock release [<type> <id>] --worktree path
+  orch-runtime lock release [<type> <id>] --worktree <path>
   orch-runtime lock release-stale <type> <id>
 
 Targets:

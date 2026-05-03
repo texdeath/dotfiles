@@ -36,6 +36,29 @@ lock_write_field() {
   printf '%s\n' "$value" > "$path/$field"
 }
 
+lock_write_metadata() {
+  local path="$1"
+  local type="$2"
+  local id="$3"
+  local workspace="$4"
+  local profile="$5"
+  local worktree="$6"
+  local window="$7"
+  local now
+  now="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+  lock_write_field "$path" resource "$type:$id"
+  lock_write_field "$path" type "$type"
+  lock_write_field "$path" id "$id"
+  lock_write_field "$path" workspace "$workspace"
+  lock_write_field "$path" profile "$profile"
+  lock_write_field "$path" worktree "$worktree"
+  lock_write_field "$path" window "$window"
+  lock_write_field "$path" pid "$$"
+  lock_write_field "$path" user "${USER:-unknown}"
+  lock_write_field "$path" host "$(hostname 2>/dev/null || echo unknown)"
+  lock_write_field "$path" created_at "$now"
+}
+
 lock_resource_name() {
   local path="$1"
   local type id
@@ -92,7 +115,7 @@ lock_acquire_one() {
   local profile="${4:-}"
   local worktree="${5:-}"
   local window="${6:-}"
-  local root path now created_path=""
+  local root path created_path=""
 
   [[ -n "$type" ]] || die "lock acquire: type is required"
   [[ -n "$id" ]] || die "lock acquire: id is required"
@@ -105,17 +128,7 @@ lock_acquire_one() {
 
   if mkdir "$path" 2>/dev/null; then
     created_path="$path"
-    now="$(date '+%Y-%m-%dT%H:%M:%S%z')"
-    lock_write_field "$path" resource "$type:$id"
-    lock_write_field "$path" type "$type"
-    lock_write_field "$path" id "$id"
-    lock_write_field "$path" workspace "$workspace"
-    lock_write_field "$path" profile "$profile"
-    lock_write_field "$path" worktree "$worktree"
-    lock_write_field "$path" window "$window"
-    lock_write_field "$path" user "${USER:-unknown}"
-    lock_write_field "$path" host "$(hostname 2>/dev/null || echo unknown)"
-    lock_write_field "$path" created_at "$now"
+    lock_write_metadata "$path" "$type" "$id" "$workspace" "$profile" "$worktree" "$window"
     printf '%s\n' "$path"
     return 0
   fi
@@ -123,6 +136,7 @@ lock_acquire_one() {
   local owner_worktree state
   owner_worktree="$(lock_read_field "$path" worktree 2>/dev/null || true)"
   if [[ -n "$worktree" && "$owner_worktree" == "$worktree" ]]; then
+    lock_write_metadata "$path" "$type" "$id" "$workspace" "$profile" "$worktree" "$window"
     printf '%s\n' "$path"
     return 0
   fi
@@ -558,7 +572,7 @@ Usage:
   orch-runtime lock list [--worktree path]
   orch-runtime lock check <type> <id>
   orch-runtime lock acquire <type> <id> [--workspace name] [--profile id] [--worktree path]
-  orch-runtime lock release [<type> <id>] --worktree path
+  orch-runtime lock release [<type> <id>] --worktree <path>
   orch-runtime lock release-stale <type> <id>
 EOF
     return
