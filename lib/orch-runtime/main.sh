@@ -54,6 +54,9 @@ main() {
     workspace|ws)
       cmd_workspace "$@"
       ;;
+    lock|locks)
+      cmd_lock "$@"
+      ;;
     *)
       usage >&2
       exit 2

@@ -338,6 +338,13 @@ Options:
   --session name   target tmux session (default: current session)
   --name window    window name (default: worktree basename)
   --dry-run        print commands without executing tmux
+
+Resource locks:
+  If the resolved profile declares runtime.locks, or <worktree>/.orchestrate/env
+  declares ORCH_RESOURCE_LOCKS, workspace start acquires those advisory locks
+  before dispatching pane commands. Existing locks are reported as conflicts,
+  including stale locks; stale locks are never removed automatically. Use
+  `orch-runtime lock release-stale <type> <id>` explicitly.
 EOF
         return
         ;;
@@ -441,6 +448,20 @@ EOF
     effective_commands+=("$(workspace_compose_pane_command "${env_csvs[$i]}" "${commands[$i]}")")
   done
 
+  local lock_specs lock_rc
+  lock_specs=""
+  lock_rc=0
+  lock_specs="$(workspace_profile_locks "$profile" "$worktree")" || lock_rc=$?
+  if [[ "$lock_rc" -eq 1 ]]; then
+    die "workspace start: could not resolve profile '$profile' runtime.locks via orchestrate loader"
+  fi
+  if [[ "$lock_rc" -eq 2 ]]; then
+    die "workspace start: profile '$profile' has invalid runtime.locks (see stderr above)"
+  fi
+  if [[ "$lock_rc" -ne 0 ]]; then
+    die "workspace start: failed to load runtime.locks for profile '$profile' (rc=$lock_rc)"
+  fi
+
   # Resolve tmux pane-base-index so the final select-pane target matches the
   # user's tmux config (default 0; 1 if `set -g pane-base-index 1`). Without
   # this, environments with pane-base-index 1 hit "can't find pane: 0".
@@ -450,8 +471,12 @@ EOF
   if [[ "$dry_run" == "true" ]]; then
     printf '# orch-runtime workspace start %s %s (dry-run)\n' "$profile" "$worktree"
     printf '# session=%s window=%s panes=%d\n' "$session" "$window_name" "$pane_count"
+    lock_print_dry_run_plan "$lock_specs"
     printf 'window_target="$(tmux new-window -d -P -F %s -t %q -n %q -c %q)"\n' "'#{window_id}'" "$session" "$window_name" "${effective_cwds[0]}"
     printf 'tmux set-option -w -t %q %s %q\n' "$window_target" "@workspace_profile" "$profile"
+    if [[ -n "$lock_specs" ]]; then
+      printf 'tmux set-option -w -t %q %s %q\n' "$window_target" "@workspace_locks" "$(lock_specs_inline "$lock_specs")"
+    fi
     printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "# pane 0: ${names[0]} (cwd=${effective_cwds[0]})"
     printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "${effective_commands[0]}"
     for (( i=1; i<pane_count; i++ )); do
@@ -465,6 +490,13 @@ EOF
   fi
 
   window_target="$(tmux new-window -d -P -F '#{window_id}' -t "$session" -n "$window_name" -c "${effective_cwds[0]}")"
+  if [[ -n "$lock_specs" ]]; then
+    if ! workspace_acquire_locks_from_specs "$lock_specs" "$profile" "$worktree" "$window_name" "$window_target"; then
+      tmux kill-window -t "$window_target" 2>/dev/null || true
+      return 1
+    fi
+    tmux set-option -w -t "$window_target" '@workspace_locks' "$(lock_specs_inline "$lock_specs")"
+  fi
   tmux set-option -w -t "$window_target" '@workspace_profile' "$profile"
   tmux send-keys -t "$window_target" "# pane 0: ${names[0]}" Enter
   tmux send-keys -t "$window_target" "${effective_commands[0]}" Enter
@@ -518,8 +550,8 @@ EOF
   is_positive_int "$lines" || die "line count must be a positive integer"
   need_tmux
 
-  printf '%-20s %-9s %-5s %-12s %-15s %s\n' "WORKSPACE" "PROFILE" "PANES" "SESSION" "CURRENT_CMD" "PATH"
-  local window_target name session_name profile pane_total current_cmd first_path
+  printf '%-20s %-9s %-5s %-12s %-18s %-15s %-72s %s\n' "WORKSPACE" "PROFILE" "PANES" "SESSION" "LOCKS" "CURRENT_CMD" "PREVIEW_URLS" "PATH"
+  local window_target name session_name profile pane_total current_cmd first_path locks_summary preview_summary
   while IFS=$'\t' read -r window_target name session_name; do
     profile="$(workspace_window_profile_from_meta "$window_target")"
     [[ "$profile" == "-" ]] && continue
@@ -527,7 +559,9 @@ EOF
     current_cmd="$(tmux list-panes -t "$window_target" -F '#{pane_current_command}' 2>/dev/null | grep -v '^$' | head -n 1)"
     current_cmd="${current_cmd:--}"
     first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
-    printf '%-20s %-9s %-5s %-12s %-15s %s\n' "$name" "$profile" "$pane_total" "$session_name" "$current_cmd" "$first_path"
+    locks_summary="$(lock_summary_for_worktree "$first_path")"
+    preview_summary="$(workspace_preview_summary "$first_path" 72)"
+    printf '%-20s %-9s %-5s %-12s %-18s %-15s %-72s %s\n' "$name" "$profile" "$pane_total" "$session_name" "$locks_summary" "$current_cmd" "$preview_summary" "$first_path"
   done < <(tmux list-windows -a -F '#{session_name}:#{window_index}	#{window_name}	#{session_name}' 2>/dev/null)
 }
 
@@ -617,12 +651,73 @@ EOF
 
 EOF
 
+  workspace_report_preview_urls "$first_path"
   workspace_report_runtime_links "$first_path"
   workspace_report_runtime_env "$first_path"
+  workspace_report_resource_locks "$first_path"
   workspace_report_docker_compose "$first_path"
   workspace_report_pane_summary "$window_target" "$lines"
   workspace_report_error_signals "$window_target" "$lines"
   workspace_report_pane_details "$window_target" "$lines"
+}
+
+cmd_workspace_open() {
+  local needle=""
+  local print_only="false"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --print)
+        print_only="true"
+        shift
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  orch-runtime workspace open <workspace> [--print]
+
+Open the primary localhost preview URL recorded in <worktree>/.orchestrate/env.
+The primary URL is selected from ORCH_REPO when available: frontend ->
+FRONTEND_PREVIEW_URL, backend -> BACKEND_PREVIEW_URL, agent ->
+AGENT_PREVIEW_URL. Without ORCH_REPO, the first http(s) preview URL is used.
+
+Options:
+  --print   print the URL instead of opening it
+EOF
+        return
+        ;;
+      -*)
+        die "unknown option for workspace open: $1"
+        ;;
+      *)
+        [[ -z "$needle" ]] || die "workspace open takes a single workspace argument"
+        needle="$1"
+        shift
+        ;;
+    esac
+  done
+
+  [[ -n "$needle" ]] || die "workspace open: workspace name is required"
+  need_tmux
+
+  local window_target first_path url
+  window_target="$(workspace_resolve_window "$needle")"
+  first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
+  url="$(workspace_preview_primary_url "$first_path" 2>/dev/null || true)"
+  [[ -n "$url" ]] || die "workspace open: no preview URL found in $first_path/.orchestrate/env"
+
+  if [[ "$print_only" == "true" ]]; then
+    printf '%s\n' "$url"
+    return
+  fi
+
+  if command -v open >/dev/null 2>&1; then
+    open "$url"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url"
+  else
+    die "workspace open: neither open nor xdg-open is available; URL: $url"
+  fi
 }
 
 cmd_workspace() {
@@ -633,6 +728,13 @@ Usage:
   orch-runtime workspace start <profile-id> <worktree-path> [--session name] [--name window] [--dry-run]
   orch-runtime workspace status [-n lines]
   orch-runtime workspace report <workspace> [-n lines]
+  orch-runtime workspace open <workspace> [--print]
+  orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--once]
+
+Profiles may declare advisory heavy-runtime locks under runtime.locks; worktree
+env files may also declare ORCH_RESOURCE_LOCKS. Locks are acquired by workspace
+start, shown by status/report, and released explicitly with
+`orch-runtime lock release ...` or `orch-runtime lock release-stale ...`.
 EOF
     return
   fi
@@ -647,8 +749,14 @@ EOF
     report)
       cmd_workspace_report "$@"
       ;;
+    open)
+      cmd_workspace_open "$@"
+      ;;
+    watch)
+      cmd_workspace_watch "$@"
+      ;;
     *)
-      die "unknown workspace subcommand: $sub (expected: start, status, report)"
+      die "unknown workspace subcommand: $sub (expected: start, status, report, open, watch)"
       ;;
   esac
 }
