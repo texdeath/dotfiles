@@ -46,18 +46,170 @@ workspace_env_key_is_sensitive() {
 
 workspace_report_value_is_url() {
   local value="$1"
-  [[ "$value" == http://* || "$value" == https://* ]]
+  [[ "$value" == http://* || "$value" == https://* || "$value" == ws://* || "$value" == wss://* ]]
 }
 
 workspace_report_port_link_allowed() {
   local key="$1"
   case "$key" in
     PORT | WEB_PORT | APP_PORT | DEV_PORT | API_PORT | HTTP_PORT | HTTPS_PORT | \
-      *_WEB_PORT | *_APP_PORT | *_DEV_PORT | *_API_PORT | *_HTTP_PORT | *_HTTPS_PORT | *_HOST_PORT)
+      HMR_PORT | WEBSOCKET_PORT | MCP_PORT | \
+      *_WEB_PORT | *_APP_PORT | *_DEV_PORT | *_API_PORT | *_HTTP_PORT | *_HTTPS_PORT | *_HOST_PORT | \
+      *_HMR_PORT | *_WEBSOCKET_PORT | *_MCP_PORT | *_COORDINATOR_PORT | *_ADK_PORT)
       return 0
       ;;
   esac
   return 1
+}
+
+workspace_env_value() {
+  local worktree="$1"
+  local wanted="$2"
+  local key value
+
+  while IFS=$'\t' read -r key value; do
+    if [[ "$key" == "$wanted" ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  done < <(workspace_env_lines "$worktree")
+  return 1
+}
+
+workspace_preview_label_for_key() {
+  local key="$1"
+  case "$key" in
+    FRONTEND_PREVIEW_URL | FRONTEND_URL)
+      printf '%s' "frontend"
+      ;;
+    BACKEND_PREVIEW_URL | BACKEND_API_URL | BACKEND_URL | NEXT_PUBLIC_API_BASE_URL | VITE_BACKEND_URL)
+      printf '%s' "backend"
+      ;;
+    AGENT_PREVIEW_URL | AGENT_URL | AGENT_COORDINATOR_URL)
+      printf '%s' "agent"
+      ;;
+    AGENT_ADK_URL)
+      printf '%s' "agent-adk"
+      ;;
+    AGENT_MCP_URL | MCP_PREVIEW_URL)
+      printf '%s' "mcp"
+      ;;
+    FRONTEND_HMR_URL)
+      printf '%s' "hmr"
+      ;;
+    FRONTEND_WEBSOCKET_URL)
+      printf '%s' "websocket"
+      ;;
+    GCS_PREVIEW_URL)
+      printf '%s' "gcs"
+      ;;
+    GCS_PROXY_URL)
+      printf '%s' "gcs-proxy"
+      ;;
+    PGADMIN_PREVIEW_URL)
+      printf '%s' "pgadmin"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+workspace_preview_urls() {
+  local worktree="$1"
+  local key value label seen
+  seen=" "
+
+  while IFS=$'\t' read -r key value; do
+    [[ -n "$key" ]] || continue
+    workspace_env_key_is_sensitive "$key" && continue
+    workspace_report_value_is_url "$value" || continue
+    label="$(workspace_preview_label_for_key "$key" 2>/dev/null || true)"
+    [[ -n "$label" ]] || continue
+    if [[ "$seen" == *" $label "* ]]; then
+      continue
+    fi
+    printf '%s\t%s\t%s\n' "$label" "$key" "$value"
+    seen="${seen}${label} "
+  done < <(workspace_env_lines "$worktree")
+}
+
+workspace_preview_summary() {
+  local worktree="$1"
+  local max="${2:-80}"
+  local label key value summary item
+  summary=""
+
+  while IFS=$'\t' read -r label key value; do
+    [[ -n "$label" ]] || continue
+    case "$label" in
+      frontend | backend | agent | mcp)
+        item="${label}=${value}"
+        if [[ -z "$summary" ]]; then
+          summary="$item"
+        else
+          summary="${summary} ${item}"
+        fi
+        ;;
+    esac
+  done < <(workspace_preview_urls "$worktree")
+
+  if [[ -z "$summary" ]]; then
+    printf '%s' "-"
+    return
+  fi
+  truncate_text "$summary" "$max"
+}
+
+workspace_preview_primary_url() {
+  local worktree="$1"
+  local repo desired label key value first_http
+  repo="$(workspace_env_value "$worktree" ORCH_REPO 2>/dev/null || true)"
+  case "$repo" in
+    frontend | backend | agent)
+      desired="$repo"
+      ;;
+    *)
+      desired=""
+      ;;
+  esac
+
+  first_http=""
+  while IFS=$'\t' read -r label key value; do
+    [[ -n "$label" ]] || continue
+    if [[ "$value" != http://* && "$value" != https://* ]]; then
+      continue
+    fi
+    [[ -n "$first_http" ]] || first_http="$value"
+    if [[ -n "$desired" && "$label" == "$desired" ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  done < <(workspace_preview_urls "$worktree")
+
+  if [[ -n "$first_http" ]]; then
+    printf '%s' "$first_http"
+    return 0
+  fi
+  return 1
+}
+
+workspace_report_preview_urls() {
+  local worktree="$1"
+  local found="false"
+  local label key value
+
+  echo "## Preview URLs"
+  while IFS=$'\t' read -r label key value; do
+    [[ -n "$label" ]] || continue
+    printf -- '- `%s` (`%s`): %s\n' "$label" "$key" "$value"
+    found="true"
+  done < <(workspace_preview_urls "$worktree")
+
+  if [[ "$found" == "false" ]]; then
+    echo "- none detected from .orchestrate/env"
+  fi
+  echo
 }
 
 workspace_report_runtime_links() {
@@ -76,6 +228,7 @@ workspace_report_runtime_links() {
       scheme="http"
       case "$key" in
         HTTPS_PORT | *_HTTPS_PORT) scheme="https" ;;
+        HMR_PORT | WEBSOCKET_PORT | *_HMR_PORT | *_WEBSOCKET_PORT) scheme="ws" ;;
       esac
       printf -- '- `%s`: %s://localhost:%s\n' "$key" "$scheme" "$value"
       found="true"

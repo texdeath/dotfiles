@@ -27,6 +27,13 @@ Usage:
   orch-runtime workspace start <profile-id> <worktree-path> [--session name] [--name window] [--dry-run]
   orch-runtime workspace status [-n lines]
   orch-runtime workspace report <workspace> [-n lines]
+  orch-runtime workspace open <workspace> [--print]
+  orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--once]
+  orch-runtime lock list [--worktree path]
+  orch-runtime lock check <type> <id>
+  orch-runtime lock acquire <type> <id> [--workspace name] [--profile id] [--worktree path]
+  orch-runtime lock release [<type> <id>] --worktree path
+  orch-runtime lock release-stale <type> <id>
 
 Targets:
   current   current pane
@@ -62,6 +69,9 @@ Examples:
   orch-runtime workspace start <profile-id> /path/to/worktree
   orch-runtime workspace status
   orch-runtime workspace report <workspace> -n 100
+  orch-runtime workspace open <workspace> --print
+  orch-runtime workspace watch <workspace>
+  orch-runtime lock list
 EOF
 }
 
