@@ -345,6 +345,9 @@ Resource locks:
   before dispatching pane commands. Existing locks are reported as conflicts,
   including stale locks; stale locks are never removed automatically. Use
   `orch-runtime lock release-stale <type> <id>` explicitly.
+  By default ORCH_RESOURCE_LOCKS is merged with profile locks. Set
+  ORCH_RESOURCE_LOCKS_MODE=overlay to treat ORCH_RESOURCE_LOCKS as a
+  subset-start overlay; an empty value suppresses all profile locks.
 EOF
         return
         ;;

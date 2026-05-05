@@ -94,6 +94,55 @@ assert_eq "5" "$count" "profile lock count"
 printf '%s\n' "$specs" | grep -q $'gpu\x1f0' || fail "gpu lock declaration missing"
 printf '%s\n' "$specs" | grep -q $'model-cache-write\x1f/tmp/model-cache' || fail "model cache lock declaration missing"
 
+mkdir -p "$worktree_a/.orchestrate"
+cat > "$worktree_a/.orchestrate/env" <<'EOF'
+ORCH_RESOURCE_LOCKS=emulator-port:9999
+EOF
+specs="$(workspace_profile_locks processor "$worktree_a")"
+count="$(printf '%s\n' "$specs" | sed '/^$/d' | wc -l | tr -d ' ')"
+assert_eq "6" "$count" "default env lock merge count"
+printf '%s\n' "$specs" | grep -q $'emulator-port\x1f9999' || fail "merged env lock declaration missing"
+
+cat > "$worktree_a/.orchestrate/env" <<'EOF'
+ORCH_RESOURCE_LOCKS_MODE=overlay
+ORCH_RESOURCE_LOCKS=
+EOF
+specs="$(workspace_profile_locks processor "$worktree_a")"
+count="$(printf '%s\n' "$specs" | sed '/^$/d' | wc -l | tr -d ' ')"
+assert_eq "0" "$count" "overlay empty lock count"
+
+cat > "$worktree_a/.orchestrate/env" <<'EOF'
+ORCH_RESOURCE_LOCKS_MODE=overlay
+ORCH_RESOURCE_LOCKS=gpu:0,pubsub-topic:local-jobs
+EOF
+specs="$(workspace_profile_locks processor "$worktree_a")"
+count="$(printf '%s\n' "$specs" | sed '/^$/d' | wc -l | tr -d ' ')"
+assert_eq "2" "$count" "overlay partial lock count"
+printf '%s\n' "$specs" | grep -q $'gpu\x1f0' || fail "overlay gpu declaration missing"
+printf '%s\n' "$specs" | grep -q $'pubsub-topic\x1flocal-jobs' || fail "overlay pubsub-topic declaration missing"
+if printf '%s\n' "$specs" | grep -q 'model-cache-write'; then
+  fail "overlay partial should not include profile model-cache lock"
+fi
+
+cat > "$worktree_a/.orchestrate/env" <<'EOF'
+ORCH_RESOURCE_LOCKS_MODE=overlay
+ORCH_HEAVY_RESOURCE_LOCKS=model-cache-write:/tmp/model-cache
+EOF
+specs="$(workspace_profile_locks processor "$worktree_a")"
+count="$(printf '%s\n' "$specs" | sed '/^$/d' | wc -l | tr -d ' ')"
+assert_eq "1" "$count" "legacy overlay alias lock count"
+printf '%s\n' "$specs" | grep -q $'model-cache-write\x1f/tmp/model-cache' || fail "legacy overlay alias declaration missing"
+
+cat > "$worktree_a/.orchestrate/env" <<'EOF'
+ORCH_RESOURCE_LOCKS_MODE=append
+ORCH_RESOURCE_LOCKS=emulator-port:9999
+EOF
+specs="$(workspace_profile_locks processor "$worktree_a")"
+count="$(printf '%s\n' "$specs" | sed '/^$/d' | wc -l | tr -d ' ')"
+assert_eq "6" "$count" "append mode should keep merge behaviour"
+
+rm -f "$worktree_a/.orchestrate/env"
+
 cmd_workspace_start processor "$worktree_a" --dry-run >"$TMP_ROOT/workspace-dry-run.out"
 grep -q "# resource_locks=5" "$TMP_ROOT/workspace-dry-run.out" || fail "workspace dry-run did not report lock declarations"
 grep -q "# lock gpu:0 -> available" "$TMP_ROOT/workspace-dry-run.out" || fail "workspace dry-run did not check gpu lock"
