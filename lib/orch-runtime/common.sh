@@ -3,6 +3,7 @@
 
 DEFAULT_LINES=120
 BUFFER_NAME="orch-runtime-share"
+ORCH_RUNTIME_DEVBOX_SERVICES_TIMEOUT_DEFAULT=8
 
 die() {
   echo "orch-runtime: $*" >&2
@@ -90,6 +91,215 @@ lower() {
 
 is_positive_int() {
   [[ "${1:-}" =~ ^[1-9][0-9]*$ ]]
+}
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+    return
+  fi
+  if command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift @ARGV; exec @ARGV' "$seconds" "$@"
+    return
+  fi
+
+  local command_pid timer_pid rc=0
+  "$@" &
+  command_pid=$!
+  (
+    sleep "$seconds"
+    kill "$command_pid" 2>/dev/null || true
+  ) &
+  timer_pid=$!
+
+  wait "$command_pid" || rc=$?
+  kill "$timer_pid" 2>/dev/null || true
+  return "$rc"
+}
+
+strip_ansi() {
+  sed -E $'s/\x1B\\[[0-9;?]*[ -/]*[@-~]//g'
+}
+
+workspace_process_compose_services() {
+  local worktree="$1"
+  local compose_file="$worktree/process-compose.yaml"
+  [[ -f "$compose_file" ]] || return 0
+
+  ruby -ryaml - "$compose_file" <<'RUBY'
+SEP = "\x1f"
+begin
+  data = YAML.load_file(ARGV[0]) || {}
+  processes = data["processes"] || {}
+  exit 0 unless processes.is_a?(Hash)
+  processes.keys.each do |name|
+    value = name.to_s
+    next if value.empty? || value.include?(SEP) || value.include?("\n")
+    puts value
+  end
+rescue Psych::SyntaxError => e
+  warn "orch-runtime: failed to parse process-compose.yaml: #{e.message}"
+  exit 2
+end
+RUBY
+}
+
+workspace_devbox_services_ls_raw() {
+  local worktree="$1"
+  local timeout_seconds="${ORCH_RUNTIME_DEVBOX_SERVICES_TIMEOUT:-$ORCH_RUNTIME_DEVBOX_SERVICES_TIMEOUT_DEFAULT}"
+  local env_file="$worktree/.orchestrate/env"
+  local -a cmd=(devbox services ls)
+
+  [[ -d "$worktree" && -f "$worktree/devbox.json" ]] || return 0
+  command -v devbox >/dev/null 2>&1 || return 127
+  is_positive_int "$timeout_seconds" || timeout_seconds="$ORCH_RUNTIME_DEVBOX_SERVICES_TIMEOUT_DEFAULT"
+  [[ -f "$env_file" ]] && cmd+=(--env-file "$env_file")
+
+  (cd "$worktree" && run_with_timeout "$timeout_seconds" "${cmd[@]}")
+}
+
+workspace_devbox_services_statuses() {
+  local worktree="$1"
+  local output rc detail
+
+  rc=0
+  output="$(workspace_devbox_services_ls_raw "$worktree" 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    detail="$(printf '%s\n' "$output" | grep -v '^[[:space:]]*$' | tail -1 | one_line)"
+    detail="${detail:-devbox services ls exited $rc}"
+    printf '__devbox\tunknown\t%s\n' "$detail"
+    return 0
+  fi
+
+  printf '%s\n' "$output" | strip_ansi | awk '
+    function trim(s) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", s)
+      return s
+    }
+    {
+      line = trim($0)
+      if (line == "") next
+      low = tolower(line)
+      if (low ~ /^(info|warn|warning|error):/) next
+      if (low ~ /^no[[:space:]].*services/) next
+      if (low ~ /^(name|service|process)[[:space:]]/) next
+      if (low ~ /^[-+|[:space:]]+$/) next
+      n = split(line, cols, /[[:space:]]+/)
+      name = cols[1]
+      status = (n >= 2 ? cols[2] : "unknown")
+      gsub(/^[|]+|[|]+$/, "", name)
+      gsub(/^[|]+|[|]+$/, "", status)
+      gsub(/[^A-Za-z0-9_.-]+$/, "", status)
+      if (name !~ /^[A-Za-z0-9_.-]+$/) next
+      if (tolower(name) ~ /^(name|service|process)$/) next
+      printf "%s\t%s\t%s\n", name, tolower(status), line
+    }
+  '
+}
+
+workspace_devbox_service_snapshot() {
+  local worktree="$1"
+  local defs statuses def line service tmp_dir devbox_error error_status
+
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/orch-runtime-devbox-services.XXXXXX")" || return 1
+  defs="$tmp_dir/definitions"
+  statuses="$tmp_dir/statuses"
+  workspace_process_compose_services "$worktree" > "$defs" 2>/dev/null || true
+  workspace_devbox_services_statuses "$worktree" > "$statuses"
+  devbox_error="$(awk -F '\t' '$1 == "__devbox" { print $3; exit }' "$statuses")"
+
+  if [[ ! -s "$defs" ]]; then
+    awk -F '\t' '$1 != "__devbox" { print }' "$statuses"
+    rm -rf "$tmp_dir"
+    return 0
+  fi
+
+  if [[ -n "$devbox_error" ]]; then
+    error_status="unknown"
+    case "$(lower "$devbox_error")" in
+      *"not running"* | *"not started"* | *"no services"* | *"no processes"*)
+        error_status="not-started"
+        ;;
+    esac
+    while IFS= read -r def; do
+      [[ -n "$def" ]] || continue
+      printf '%s\t%s\t%s\n' "$def" "$error_status" "$devbox_error"
+    done < "$defs"
+    rm -rf "$tmp_dir"
+    return 0
+  fi
+
+  while IFS= read -r def; do
+    [[ -n "$def" ]] || continue
+    line="$(awk -F '\t' -v svc="$def" '$1 == svc { print; found = 1; exit }' "$statuses")"
+    if [[ -n "$line" ]]; then
+      printf '%s\n' "$line"
+    else
+      printf '%s\tnot-started\tnot started\n' "$def"
+    fi
+  done < "$defs"
+
+  while IFS=$'\t' read -r service _; do
+    [[ -n "$service" && "$service" != "__devbox" ]] || continue
+    if ! grep -Fxq "$service" "$defs"; then
+      awk -F '\t' -v svc="$service" '$1 == svc { print; exit }' "$statuses"
+    fi
+  done < "$statuses"
+
+  rm -rf "$tmp_dir"
+}
+
+workspace_devbox_service_status_kind() {
+  local status="$1"
+  case "$(lower "$status")" in
+    running|up|healthy|ok|started|starting)
+      printf '%s' "ok"
+      ;;
+    not-started|stopped|disabled)
+      printf '%s' "not-started"
+      ;;
+    unhealthy|exited|dead|failed|failure|error|restarting|crashed)
+      printf '%s' "alert"
+      ;;
+    *)
+      printf '%s' "unknown"
+      ;;
+  esac
+}
+
+workspace_devbox_services_summary() {
+  local worktree="$1"
+  local max="${2:-48}"
+  local snapshot service status detail kind running alerts unknown not_started summary
+
+  snapshot="$(workspace_devbox_service_snapshot "$worktree")"
+  [[ -n "$snapshot" ]] || { printf '%s' "-"; return; }
+
+  running=""
+  alerts=""
+  unknown=""
+  not_started=""
+  while IFS=$'\t' read -r service status detail; do
+    [[ -n "$service" ]] || continue
+    kind="$(workspace_devbox_service_status_kind "$status")"
+    case "$kind" in
+      ok) running="${running}${service}," ;;
+      alert) alerts="${alerts}${service}:${status}," ;;
+      not-started) not_started="${not_started}${service}," ;;
+      *) unknown="${unknown}${service}:${status}," ;;
+    esac
+  done <<< "$snapshot"
+
+  summary=""
+  [[ -n "$running" ]] && summary="${summary}running:${running%,} "
+  [[ -n "$alerts" ]] && summary="${summary}alert:${alerts%,} "
+  [[ -n "$unknown" ]] && summary="${summary}unknown:${unknown%,} "
+  [[ -n "$not_started" ]] && summary="${summary}not-started:${not_started%,}"
+  summary="$(printf '%s' "$summary" | one_line)"
+  [[ -n "$summary" ]] || summary="-"
+  truncate_text "$summary" "$max"
 }
 
 is_safe_session_name() {

@@ -13,7 +13,8 @@ Usage:
 Continuously inspect a workspace tmux window and print a summary when runtime
 signals change. Signals cover AI panes waiting for input, stopped dev/API panes,
 test/typecheck failures, docker compose unhealthy/exited services, panes that
-disappear or exit, and stale output for long-running runtime panes.
+disappear or exit, Devbox services that are started and unhealthy/exited, and
+stale output for long-running runtime panes.
 
 Options:
   -n, --lines N             captured lines per pane (default: 120)
@@ -182,26 +183,7 @@ workspace_watch_root_from_window() {
 }
 
 workspace_watch_run_with_timeout() {
-  local seconds="$1"
-  shift
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$seconds" "$@"
-    return
-  fi
-
-  local command_pid timer_pid rc=0
-  "$@" &
-  command_pid=$!
-  (
-    sleep "$seconds"
-    kill "$command_pid" 2>/dev/null || true
-  ) &
-  timer_pid=$!
-
-  wait "$command_pid" || rc=$?
-  kill "$timer_pid" 2>/dev/null || true
-  wait "$timer_pid" 2>/dev/null || true
-  return "$rc"
+  run_with_timeout "$@"
 }
 
 workspace_watch_compose_signal() {
@@ -253,6 +235,36 @@ workspace_watch_compose_signal() {
   printf 'compose\tcompose\t%s\t%s\t-\t0\n' "$status" "$detail"
 }
 
+workspace_watch_devbox_services_signal() {
+  local worktree="$1"
+  local service status detail kind watch_status watch_detail
+
+  [[ -n "$worktree" && -d "$worktree" ]] || return 0
+  [[ -f "$worktree/process-compose.yaml" || -f "$worktree/devbox.json" ]] || return 0
+
+  while IFS=$'\t' read -r service status detail; do
+    [[ -n "$service" ]] || continue
+    kind="$(workspace_devbox_service_status_kind "$status")"
+    [[ "$kind" != "not-started" ]] || continue
+
+    case "$kind" in
+      alert)
+        watch_status="alert"
+        watch_detail="devbox service ${service} is ${status}: $(truncate_text "$detail" 120)"
+        ;;
+      ok)
+        watch_status="ok"
+        watch_detail="devbox service ${service} is ${status}"
+        ;;
+      *)
+        watch_status="unknown"
+        watch_detail="devbox service ${service} status is ${status}: $(truncate_text "$detail" 120)"
+        ;;
+    esac
+    printf 'devbox:%s\tdevbox-service\t%s\t%s\t-\t0\n' "$service" "$watch_status" "$watch_detail"
+  done < <(workspace_devbox_service_snapshot "$worktree")
+}
+
 workspace_watch_snapshot() {
   local window_target="$1"
   local lines="$2"
@@ -292,6 +304,7 @@ workspace_watch_snapshot() {
   done < <(tmux list-panes -t "$window_target" -F '#{pane_id}	#{pane_current_command}	#{pane_title}	#{pane_current_path}	#{pane_dead}' 2>/dev/null)
 
   workspace_watch_compose_signal "$worktree"
+  workspace_watch_devbox_services_signal "$worktree"
 }
 
 workspace_watch_append_missing_panes() {
