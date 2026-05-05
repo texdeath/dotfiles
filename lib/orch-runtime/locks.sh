@@ -204,18 +204,27 @@ lock_print_dry_run_plan() {
 lock_env_specs() {
   local worktree="$1"
   local env_file="$worktree/.orchestrate/env"
-  local value token type id
-  local -a tokens
+  local value token type id rest
   [[ -f "$env_file" ]] || return 0
 
   while IFS= read -r value; do
     value="${value#ORCH_RESOURCE_LOCKS=}"
     value="${value#ORCH_HEAVY_RESOURCE_LOCKS=}"
-    IFS=',' read -ra tokens <<< "$value"
-    for token in "${tokens[@]}"; do
+    rest="$value"
+    while true; do
+      if [[ "$rest" == *,* ]]; then
+        token="${rest%%,*}"
+        rest="${rest#*,}"
+      else
+        token="$rest"
+        rest=""
+      fi
       token="${token#"${token%%[![:space:]]*}"}"
       token="${token%"${token##*[![:space:]]}"}"
-      [[ -n "$token" ]] || continue
+      if [[ -z "$token" ]]; then
+        [[ -n "$rest" ]] || break
+        continue
+      fi
       if [[ "$token" == *=* ]]; then
         type="${token%%=*}"
         id="${token#*=}"
@@ -223,20 +232,70 @@ lock_env_specs() {
         type="${token%%:*}"
         id="${token#*:}"
       else
+        [[ -n "$rest" ]] || break
         continue
       fi
-      [[ -n "$type" && -n "$id" ]] || continue
+      if [[ -z "$type" || -z "$id" ]]; then
+        [[ -n "$rest" ]] || break
+        continue
+      fi
       printf '%s%s%s\n' "$type" "$LOCK_SEP" "$id"
+      [[ -n "$rest" ]] || break
     done
   done < <(grep -E '^(ORCH_RESOURCE_LOCKS|ORCH_HEAVY_RESOURCE_LOCKS)=' "$env_file" 2>/dev/null || true)
+}
+
+lock_env_locks_declared() {
+  local worktree="$1"
+  local env_file="$worktree/.orchestrate/env"
+  [[ -f "$env_file" ]] || return 1
+  grep -Eq '^(ORCH_RESOURCE_LOCKS|ORCH_HEAVY_RESOURCE_LOCKS)=' "$env_file"
+}
+
+lock_env_locks_mode() {
+  local worktree="$1"
+  local env_file="$worktree/.orchestrate/env"
+  local mode
+
+  [[ -f "$env_file" ]] || { printf '%s' "merge"; return 0; }
+  mode="$(
+    awk -F '=' '
+      $1 == "ORCH_RESOURCE_LOCKS_MODE" {
+        value = $0
+        sub(/^[^=]*=/, "", value)
+        print value
+        found = 1
+        exit
+      }
+      END {
+        if (!found) print ""
+      }
+    ' "$env_file" 2>/dev/null
+  )"
+  mode="$(lower "$mode")"
+  case "$mode" in
+    ""|merge|append)
+      printf '%s' "merge"
+      ;;
+    overlay|replace|override)
+      printf '%s' "overlay"
+      ;;
+    *)
+      printf 'orch-runtime: invalid ORCH_RESOURCE_LOCKS_MODE: %s (expected merge or overlay)\n' "$mode" >&2
+      return 2
+      ;;
+  esac
 }
 
 workspace_profile_locks() {
   local profile="$1"
   local worktree="$2"
-  local loader profiles_dir profile_json env_specs profile_specs rc
+  local loader profiles_dir profile_json env_specs env_mode env_declared profile_specs rc
 
   env_specs="$(lock_env_specs "$worktree")"
+  env_mode="$(lock_env_locks_mode "$worktree")" || return 2
+  env_declared="false"
+  lock_env_locks_declared "$worktree" && env_declared="true"
   loader="$(workspace_resolve_loader)" || {
     printf '%s' "$env_specs"
     return 0
@@ -318,6 +377,11 @@ RUBY
     return 2
   fi
   [[ "$rc" -eq 0 ]] || return "$rc"
+
+  if [[ "$env_mode" == "overlay" && "$env_declared" == "true" ]]; then
+    printf '%s\n' "$env_specs" | sed '/^$/d' | awk '!seen[$0]++'
+    return 0
+  fi
 
   {
     printf '%s\n' "$profile_specs"
