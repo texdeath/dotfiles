@@ -29,6 +29,8 @@ Usage:
   orch-runtime workspace report <workspace> [-n lines]
   orch-runtime workspace open <workspace> [--print]
   orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--once]
+  orch-runtime workspace stop <workspace> [--archive-logs] [--keep-window] [--force]
+  orch-runtime workspace clean <workspace> [--detect-only] [--force]
   orch-runtime lock list [--worktree path]
   orch-runtime lock check <type> <id>
   orch-runtime lock acquire <type> <id> [--workspace name] [--profile id] [--worktree path]
