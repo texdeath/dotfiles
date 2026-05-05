@@ -297,6 +297,36 @@ workspace_report_docker_compose() {
   echo
 }
 
+workspace_report_devbox_services() {
+  local worktree="$1"
+  local found="false"
+  local service status detail
+
+  echo "## Devbox Services"
+
+  if [[ ! -f "$worktree/process-compose.yaml" && ! -f "$worktree/devbox.json" ]]; then
+    echo "- process-compose.yaml / devbox.json not found"
+    echo
+    return
+  fi
+
+  echo "| Service | Status | Detail |"
+  echo "|---|---|---|"
+  while IFS=$'\t' read -r service status detail; do
+    [[ -n "$service" ]] || continue
+    printf '| `%s` | `%s` | %s |\n' \
+      "$(markdown_cell "$service" 48)" \
+      "$(markdown_cell "$status" 24)" \
+      "$(markdown_cell "$detail" 96)"
+    found="true"
+  done < <(workspace_devbox_service_snapshot "$worktree")
+
+  if [[ "$found" == "false" ]]; then
+    echo "| - | `not-started` | no services detected |"
+  fi
+  echo
+}
+
 workspace_report_state_counts() {
   local window_target="$1"
   local lines="$2"

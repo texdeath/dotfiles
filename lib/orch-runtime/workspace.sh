@@ -550,8 +550,8 @@ EOF
   is_positive_int "$lines" || die "line count must be a positive integer"
   need_tmux
 
-  printf '%-20s %-9s %-5s %-12s %-18s %-15s %-72s %s\n' "WORKSPACE" "PROFILE" "PANES" "SESSION" "LOCKS" "CURRENT_CMD" "PREVIEW_URLS" "PATH"
-  local window_target name session_name profile pane_total current_cmd first_path locks_summary preview_summary
+  printf '%-20s %-9s %-5s %-12s %-18s %-32s %-15s %-72s %s\n' "WORKSPACE" "PROFILE" "PANES" "SESSION" "LOCKS" "DEVBOX_SERVICES" "CURRENT_CMD" "PREVIEW_URLS" "PATH"
+  local window_target name session_name profile pane_total current_cmd first_path locks_summary services_summary preview_summary
   while IFS=$'\t' read -r window_target name session_name; do
     profile="$(workspace_window_profile_from_meta "$window_target")"
     [[ "$profile" == "-" ]] && continue
@@ -560,8 +560,9 @@ EOF
     current_cmd="${current_cmd:--}"
     first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
     locks_summary="$(lock_summary_for_worktree "$first_path")"
+    services_summary="$(workspace_devbox_services_summary "$first_path" 32)"
     preview_summary="$(workspace_preview_summary "$first_path" 72)"
-    printf '%-20s %-9s %-5s %-12s %-18s %-15s %-72s %s\n' "$name" "$profile" "$pane_total" "$session_name" "$locks_summary" "$current_cmd" "$preview_summary" "$first_path"
+    printf '%-20s %-9s %-5s %-12s %-18s %-32s %-15s %-72s %s\n' "$name" "$profile" "$pane_total" "$session_name" "$locks_summary" "$services_summary" "$current_cmd" "$preview_summary" "$first_path"
   done < <(tmux list-windows -a -F '#{session_name}:#{window_index}	#{window_name}	#{session_name}' 2>/dev/null)
 }
 
@@ -656,6 +657,7 @@ EOF
   workspace_report_runtime_env "$first_path"
   workspace_report_resource_locks "$first_path"
   workspace_report_docker_compose "$first_path"
+  workspace_report_devbox_services "$first_path"
   workspace_report_pane_summary "$window_target" "$lines"
   workspace_report_error_signals "$window_target" "$lines"
   workspace_report_pane_details "$window_target" "$lines"
