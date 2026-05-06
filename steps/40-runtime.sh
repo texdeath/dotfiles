@@ -24,4 +24,30 @@ else
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > "$LOG_DIR/rust.log" 2>&1
     ok "Rust: 新規インストール"
   fi
+
+  # Global pnpm packages
+  if command -v pnpm >/dev/null 2>&1; then
+    : "${PNPM_HOME:=$HOME/Library/pnpm}"
+    export PNPM_HOME
+    mkdir -p "$PNPM_HOME"
+    case ":$PATH:" in
+      *":$PNPM_HOME:"*) ;;
+      *) export PATH="$PNPM_HOME:$PATH" ;;
+    esac
+
+    PNPM_GLOBAL_PACKAGES=(
+    )
+    for pkg in "${PNPM_GLOBAL_PACKAGES[@]}"; do
+      if pnpm list -g "$pkg" 2>/dev/null | grep -q "^$pkg "; then
+        ok "pnpm: $pkg は既にインストール済み"
+      else
+        pnpm add -g "$pkg" > "$LOG_DIR/pnpm-$pkg.log" 2>&1 &
+        PID_PNPM=$!
+        spin $PID_PNPM "pnpm add -g $pkg..."
+        wait $PID_PNPM && ok "pnpm add -g $pkg 完了" || warn "pnpm add -g $pkg 失敗 (ログ: $LOG_DIR/pnpm-$pkg.log)"
+      fi
+    done
+  else
+    warn "pnpm が見つかりません (Brewfile を確認してください)"
+  fi
 fi
