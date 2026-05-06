@@ -1204,6 +1204,7 @@ Usage:
   orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--once]
   orch-runtime workspace stop <workspace> [--archive-logs] [--keep-window] [--force]
   orch-runtime workspace clean <workspace> [--detect-only] [--force]
+  orch-runtime workspace group <create|add|status|report|stop> ...
 
 Profiles may declare advisory heavy-runtime locks under runtime.locks; worktree
 env files may also declare ORCH_RESOURCE_LOCKS. Locks are acquired by workspace
@@ -1235,8 +1236,11 @@ EOF
     clean)
       cmd_workspace_clean "$@"
       ;;
+    group)
+      cmd_workspace_group "$@"
+      ;;
     *)
-      die "unknown workspace subcommand: $sub (expected: start, status, report, open, watch, stop, clean)"
+      die "unknown workspace subcommand: $sub (expected: start, status, report, open, watch, stop, clean, group)"
       ;;
   esac
 }

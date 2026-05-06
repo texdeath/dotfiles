@@ -31,6 +31,8 @@ source "$ORCH_RUNTIME_LIB_DIR/report.sh"
 source "$ORCH_RUNTIME_LIB_DIR/watch.sh"
 # shellcheck source=../lib/orch-runtime/workspace.sh
 source "$ORCH_RUNTIME_LIB_DIR/workspace.sh"
+# shellcheck source=../lib/orch-runtime/groups.sh
+source "$ORCH_RUNTIME_LIB_DIR/groups.sh"
 # shellcheck source=../lib/orch-runtime/main.sh
 source "$ORCH_RUNTIME_LIB_DIR/main.sh"
 
