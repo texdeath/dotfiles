@@ -327,6 +327,45 @@ workspace_report_devbox_services() {
   echo
 }
 
+workspace_terraform_summary_line_is_sensitive() {
+  local line
+  line="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$line" in
+    *secret* | *token* | *password* | *passwd* | *credential* | *private* | *api_key* | *sensitive*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+workspace_report_terraform_plan() {
+  local worktree="$1"
+  local summary_file="$worktree/.orchestrate/terraform/summary.md"
+  local found="false"
+  local line
+
+  echo "## Terraform Plan"
+
+  if [[ ! -f "$summary_file" ]]; then
+    echo "- .orchestrate/terraform/summary.md not found"
+    echo
+    return
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if workspace_terraform_summary_line_is_sensitive "$line"; then
+      continue
+    fi
+    printf '%s\n' "$line"
+    found="true"
+  done < "$summary_file"
+
+  if [[ "$found" == "false" ]]; then
+    echo "- summary contained no non-sensitive lines"
+  fi
+  echo
+}
+
 workspace_report_state_counts() {
   local window_target="$1"
   local lines="$2"

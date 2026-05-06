@@ -678,6 +678,7 @@ EOF
   workspace_report_resource_locks "$first_path"
   workspace_report_docker_compose "$first_path"
   workspace_report_devbox_services "$first_path"
+  workspace_report_terraform_plan "$first_path"
   workspace_report_pane_summary "$window_target" "$lines"
   workspace_report_error_signals "$window_target" "$lines"
   workspace_report_pane_details "$window_target" "$lines"
