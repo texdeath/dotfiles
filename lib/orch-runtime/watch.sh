@@ -336,11 +336,12 @@ workspace_watch_record_changed() {
 workspace_watch_emit_summary() {
   local workspace="$1"
   local window_target="$2"
-  local current="$3"
-  local previous="$4"
-  local log_file="$5"
-  local now_text="$6"
-  local tmp_out="$7"
+  local worktree="$3"
+  local current="$4"
+  local previous="$5"
+  local log_file="$6"
+  local now_text="$7"
+  local tmp_out="$8"
 
   local total=0 alert_count=0 stale_count=0 unknown_count=0 ok_count=0
   local key category status detail hash changed_at
@@ -368,6 +369,7 @@ workspace_watch_emit_summary() {
     while IFS=$'\t' read -r key category status detail hash changed_at; do
       [[ -n "$key" ]] || continue
       if workspace_watch_record_changed "$previous" "$key" "$status" "$detail"; then
+        metrics_emit_watch_signal "$worktree" "$workspace" "$window_target" "$key" "$category" "$status" "$detail"
         printf '  - %-12s %-8s %-7s %s\n' "$key" "$category" "$status" "$detail"
       fi
     done < "$current"
@@ -459,7 +461,7 @@ cmd_workspace_watch() {
     : > "$current"
     workspace_watch_snapshot "$window_target" "$lines" "$stale_seconds" "$previous" "$now" "$worktree" > "$current"
     workspace_watch_append_missing_panes "$previous" "$current"
-    workspace_watch_emit_summary "$workspace" "$window_target" "$current" "$previous" "$log_file" "$now_text" "$tmp_out" || true
+    workspace_watch_emit_summary "$workspace" "$window_target" "$worktree" "$current" "$previous" "$log_file" "$now_text" "$tmp_out" || true
     cp "$current" "$previous"
     [[ "$once" == "true" ]] && break
     sleep "$interval"

@@ -17,6 +17,8 @@ ORCH_RUNTIME_LIB_DIR="${ORCH_RUNTIME_LIB_DIR:-$(cd "$orch_runtime_bin_dir/../lib
 
 # shellcheck source=../lib/orch-runtime/common.sh
 source "$ORCH_RUNTIME_LIB_DIR/common.sh"
+# shellcheck source=../lib/orch-runtime/metrics.sh
+source "$ORCH_RUNTIME_LIB_DIR/metrics.sh"
 # shellcheck source=../lib/orch-runtime/panes.sh
 source "$ORCH_RUNTIME_LIB_DIR/panes.sh"
 # shellcheck source=../lib/orch-runtime/commands.sh
