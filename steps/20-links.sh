@@ -37,8 +37,22 @@ if [ -L "$HOME/bin/ai-tmux" ]; then
     ok "skip ~/bin/ai-tmux (target=$STALE_TARGET, not dotfiles-owned)"
   fi
 fi
-dry_link "$DOTFILES/bin/orch-runtime" "$HOME/bin/orch-runtime"
-ok "bin (fileops, editor, notion, claude, orch-runtime)"
+# orch-runtime は texdeath/orchestrate 側へ移管されたため、dotfiles-owned
+# な古い symlink だけを掃除する。orchestrate など別ターゲットへの symlink
+# は user 管理として触らない。
+if [ -L "$HOME/bin/orch-runtime" ]; then
+  STALE_TARGET="$(readlink "$HOME/bin/orch-runtime" 2>/dev/null || true)"
+  if [ "$STALE_TARGET" = "$DOTFILES/bin/orch-runtime" ]; then
+    if [ "$DRY_RUN" = true ]; then
+      ok "remove stale symlink ~/bin/orch-runtime -> $STALE_TARGET (dry-run)"
+    else
+      rm -f "$HOME/bin/orch-runtime"
+    fi
+  else
+    ok "skip ~/bin/orch-runtime (target=$STALE_TARGET, not dotfiles-owned)"
+  fi
+fi
+ok "bin (fileops, editor, notion, claude)"
 
 # secrets
 dry_link "$DOTFILES/secrets/bw-secret.sh" "$HOME/bin/bw-secret.sh"

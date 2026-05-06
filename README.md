@@ -128,22 +128,6 @@ dotfiles/
     └── public-private-integration-design.md
 ```
 
-## orch-runtime workspace watch 通知
-
-`orch-runtime workspace watch <workspace>` は runtime signal が変化したときに標準出力へ summary を出し、必要に応じて外部通知も送る。初回 snapshot は通知せず、前回 snapshot から `alert` / `stale` / `unknown` などへ変化した signal だけを通知する。
-
-現在の pane 状態を一度だけ通知したい場合は `orch-runtime notify claude` や `orch-runtime notify %1` を使う。
-
-| 設定 | 内容 |
-|------|------|
-| `--no-notify` | 通知を無効化し、標準出力と `--log-file` のみ使う |
-| `--notify-statuses alert,stale,unknown` | 通知対象 status を指定 |
-| `ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_COMMAND` | 任意の通知コマンドを `<title> <message>` で呼び出す |
-| `ORCH_RUNTIME_WORKSPACE_WATCH_WEBHOOK_URL` | Slack 互換 incoming webhook に `{"text": ...}` を POST する |
-| `ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_TIMEOUT` | 通知コマンド / webhook の timeout 秒数 |
-
-通知先が未設定、または `curl` / 通知コマンドが存在しない場合は何も送らず継続する。macOS では `terminal-notifier` を優先し、なければ `osascript` が使える場合だけローカル通知を併用する。Webhook URL や通知先の認証情報はリポジトリに置かず、ローカルのシェル設定や環境変数から渡す。
-
 ## CI
 
 Push / PR で以下を自動検証:
