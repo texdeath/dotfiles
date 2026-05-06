@@ -61,6 +61,37 @@ assert_eq "stale" "$(lock_status "$stale_path")" "stale lock status"
 cmd_lock release-stale emulator-port 8086 >"$TMP_ROOT/release-stale.out"
 [[ ! -d "$stale_path" ]] || fail "stale lock directory still exists after release-stale"
 
+mkdir -p "$TMP_ROOT/bin"
+cat > "$TMP_ROOT/bin/devbox" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "services" && "${2:-}" == "ls" ]]; then
+  printf '%b' "${DEVBOX_SERVICES_LS_OUTPUT:-}"
+  exit "${DEVBOX_SERVICES_LS_RC:-0}"
+fi
+echo "unexpected devbox invocation: $*" >&2
+exit 1
+SH
+chmod +x "$TMP_ROOT/bin/devbox"
+PATH="$TMP_ROOT/bin:$PATH"
+
+runtime_worktree="$TMP_ROOT/runtime-worktree"
+mkdir -p "$runtime_worktree"
+cat > "$runtime_worktree/devbox.json" <<'JSON'
+{"packages":[]}
+JSON
+cat > "$runtime_worktree/process-compose.yaml" <<'YAML'
+version: "0.5"
+processes:
+  worker:
+    command: "echo worker"
+YAML
+export DEVBOX_SERVICES_LS_OUTPUT=$'Name     Status\nworker   Stopped\n'
+runtime_path="$(lock_acquire_one "runtime-slot" "worker" "runtime-workspace" "worker" "$runtime_worktree" "")"
+assert_eq "suspicious" "$(lock_status "$runtime_path")" "not-started devbox lock status"
+runtime_evidence="$(lock_runtime_evidence_summary "$runtime_path")"
+[[ "$runtime_evidence" == *"devbox=suspicious"* ]] || fail "runtime evidence should include suspicious devbox state: $runtime_evidence"
+cmd_lock release runtime-slot worker --worktree "$runtime_worktree" >/dev/null
+
 loader="$TMP_ROOT/load-profile.sh"
 cat > "$loader" <<'SH'
 #!/usr/bin/env sh
@@ -166,5 +197,21 @@ summary="$(lock_summary_for_worktree "$worktree_a")"
 [[ "$summary" == *"stale"* ]] || fail "workspace summary did not include stale tmux-window-backed locks: $summary"
 cmd_lock release --worktree "$worktree_a" >"$TMP_ROOT/release-all.out"
 grep -q "released: gpu:0" "$TMP_ROOT/release-all.out" || fail "release --worktree did not release profile locks"
+
+cat > "$TMP_ROOT/bin/tmux" <<'SH'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "show-option" && "$*" == *"@workspace_locks"* ]]; then
+  printf '%s\n' "${TMUX_WORKSPACE_LOCKS_OUTPUT:-}"
+  exit 0
+fi
+exit 1
+SH
+chmod +x "$TMP_ROOT/bin/tmux"
+export TMUX_WORKSPACE_LOCKS_OUTPUT="gpu:42,emulator-port:4040"
+declared_missing="$(lock_declared_discrepancies_for_window "sample:1" "$worktree_a")"
+printf '%s\n' "$declared_missing" | grep -q $'gpu:42\tmissing' || fail "declared missing gpu lock not reported: $declared_missing"
+printf '%s\n' "$declared_missing" | grep -q $'emulator-port:4040\tmissing' || fail "declared missing port lock not reported: $declared_missing"
+summary="$(lock_summary_for_worktree "$worktree_a" "sample:1")"
+[[ "$summary" == *"missing:2"* ]] || fail "workspace summary did not include declared missing locks: $summary"
 
 echo "ok"

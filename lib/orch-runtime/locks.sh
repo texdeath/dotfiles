@@ -79,9 +79,196 @@ lock_tmux_window_exists() {
   tmux display-message -p -t "$window" '#{window_id}' >/dev/null 2>&1
 }
 
-lock_status() {
+lock_path_is_under_worktree() {
+  local path="$1"
+  local worktree="$2"
+  [[ -n "$path" && -n "$worktree" ]] || return 1
+  [[ "$path" == "$worktree" || "$path" == "$worktree/"* ]]
+}
+
+lock_tmux_runtime_evidence() {
+  local window="$1"
+  local worktree="$2"
+  local scope="tmux"
+  local pane_count option_worktree pane_path pane_match
+
+  if [[ -z "$window" ]]; then
+    printf '%s\tskipped\tno window metadata\n' "$scope"
+    return 0
+  fi
+
+  if ! lock_tmux_window_exists "$window"; then
+    if ! command -v tmux >/dev/null 2>&1; then
+      printf '%s\tunknown\ttmux command not found; window=%s\n' "$scope" "$window"
+    elif ! tmux has-session >/dev/null 2>&1; then
+      printf '%s\tabsent\tno tmux server; window=%s\n' "$scope" "$window"
+    else
+      printf '%s\tabsent\twindow not found: %s\n' "$scope" "$window"
+    fi
+    return 0
+  fi
+
+  pane_count="$(tmux list-panes -t "$window" -F '.' 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ -z "$pane_count" || "$pane_count" -eq 0 ]]; then
+    printf '%s\tpresent\twindow=%s panes=unknown\n' "$scope" "$window"
+    return 0
+  fi
+
+  option_worktree="$(tmux show-option -wv -t "$window" '@workspace_worktree' 2>/dev/null || true)"
+  if [[ -n "$option_worktree" && -n "$worktree" && "$option_worktree" != "$worktree" ]]; then
+    printf '%s\tsuspicious\twindow=%s panes=%s @workspace_worktree=%s owner_worktree=%s\n' \
+      "$scope" "$window" "$pane_count" "$option_worktree" "$worktree"
+    return 0
+  fi
+
+  pane_match="false"
+  if [[ -n "$worktree" ]]; then
+    while IFS= read -r pane_path; do
+      if lock_path_is_under_worktree "$pane_path" "$worktree"; then
+        pane_match="true"
+        break
+      fi
+    done < <(tmux list-panes -t "$window" -F '#{pane_current_path}' 2>/dev/null || true)
+  fi
+
+  if [[ -n "$option_worktree" && "$option_worktree" == "$worktree" ]]; then
+    printf '%s\tpresent\twindow=%s panes=%s worktree=window-option\n' "$scope" "$window" "$pane_count"
+  elif [[ "$pane_match" == "true" ]]; then
+    printf '%s\tpresent\twindow=%s panes=%s worktree=pane-path\n' "$scope" "$window" "$pane_count"
+  elif [[ -z "$worktree" ]]; then
+    printf '%s\tpresent\twindow=%s panes=%s worktree=not-recorded\n' "$scope" "$window" "$pane_count"
+  else
+    printf '%s\tsuspicious\twindow=%s panes=%s no pane path under owner_worktree=%s\n' \
+      "$scope" "$window" "$pane_count" "$worktree"
+  fi
+}
+
+lock_devbox_runtime_evidence() {
+  local worktree="$1"
+  local scope="devbox"
+  local snapshot service status detail kind
+  local present_count=0 alert_count=0 unknown_count=0 not_started_count=0
+  local present_items="" alert_items="" unknown_items="" not_started_items=""
+
+  if [[ -z "$worktree" || ! -d "$worktree" ]]; then
+    printf '%s\tskipped\tworktree unavailable\n' "$scope"
+    return 0
+  fi
+  if [[ ! -f "$worktree/process-compose.yaml" && ! -f "$worktree/devbox.json" ]]; then
+    printf '%s\tskipped\tno process-compose.yaml or devbox.json\n' "$scope"
+    return 0
+  fi
+  if ! command -v devbox >/dev/null 2>&1; then
+    printf '%s\tunknown\tdevbox command not found\n' "$scope"
+    return 0
+  fi
+
+  snapshot="$(workspace_devbox_service_snapshot "$worktree" 2>/dev/null || true)"
+  if [[ -z "$snapshot" ]]; then
+    printf '%s\tabsent\tno services reported\n' "$scope"
+    return 0
+  fi
+
+  while IFS=$'\t' read -r service status detail; do
+    [[ -n "$service" ]] || continue
+    kind="$(workspace_devbox_service_status_kind "$status")"
+    case "$kind" in
+      ok)
+        present_count=$((present_count + 1))
+        present_items="${present_items}${service}:${status},"
+        ;;
+      alert)
+        alert_count=$((alert_count + 1))
+        alert_items="${alert_items}${service}:${status},"
+        ;;
+      unknown)
+        unknown_count=$((unknown_count + 1))
+        unknown_items="${unknown_items}${service}:${status},"
+        ;;
+      not-started)
+        not_started_count=$((not_started_count + 1))
+      not_started_items="${not_started_items}${service},"
+        ;;
+    esac
+  done <<< "$snapshot"
+
+  if [[ "$alert_count" -gt 0 ]]; then
+    printf '%s\tsuspicious\tservices=%s\n' "$scope" "${alert_items%,}"
+  elif [[ "$present_count" -gt 0 ]]; then
+    printf '%s\tpresent\tservices=%s\n' "$scope" "${present_items%,}"
+  elif [[ "$unknown_count" -gt 0 ]]; then
+    printf '%s\tunknown\tservices=%s\n' "$scope" "${unknown_items%,}"
+  else
+    printf '%s\tsuspicious\tservices not started=%s\n' "$scope" "${not_started_items%,}"
+  fi
+}
+
+lock_docker_runtime_evidence() {
+  local worktree="$1"
+  local scope="docker"
+  local project line count=0 first=""
+
+  if [[ -z "$worktree" || ! -d "$worktree" ]]; then
+    printf '%s\tskipped\tworktree unavailable\n' "$scope"
+    return 0
+  fi
+
+  project="$(workspace_compose_project_from_env "$worktree" 2>/dev/null || true)"
+  if [[ -z "$project" ]]; then
+    printf '%s\tskipped\tno ORCH_PROJECT in .orchestrate/env\n' "$scope"
+    return 0
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    printf '%s\tunknown\tdocker command not found; project=%s\n' "$scope" "$project"
+    return 0
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    count=$((count + 1))
+    [[ -n "$first" ]] || first="$line"
+  done < <(workspace_docker_residuals_for_project "$project" 2>/dev/null || true)
+
+  if [[ "$count" -gt 0 ]]; then
+    printf '%s\tpresent\tproject=%s resources=%s first=%s\n' "$scope" "$project" "$count" "$first"
+  else
+    printf '%s\tsuspicious\tproject=%s resources=0\n' "$scope" "$project"
+  fi
+}
+
+lock_runtime_evidence_lines() {
   local path="$1"
   local worktree window
+  worktree="$(lock_read_field "$path" worktree 2>/dev/null || true)"
+  window="$(lock_read_field "$path" window 2>/dev/null || true)"
+  lock_tmux_runtime_evidence "$window" "$worktree"
+  lock_devbox_runtime_evidence "$worktree"
+  lock_docker_runtime_evidence "$worktree"
+}
+
+lock_runtime_evidence_summary() {
+  local path="$1"
+  local scope state detail summary=""
+  while IFS=$'\t' read -r scope state detail; do
+    [[ -n "$scope" ]] || continue
+    detail="$(printf '%s' "$detail" | one_line)"
+    if [[ -z "$summary" ]]; then
+      summary="${scope}=${state} (${detail})"
+    else
+      summary="${summary}; ${scope}=${state} (${detail})"
+    fi
+  done < <(lock_runtime_evidence_lines "$path")
+  printf '%s' "${summary:--}"
+}
+
+lock_status() {
+  local path="$1"
+  local worktree scope state detail
+  local has_runtime_metadata="false"
+  local has_present="false"
+  local has_unknown="false"
+  local has_suspicious="false"
+  local has_absent="false"
   [[ -d "$path" ]] || { printf '%s' "missing"; return; }
 
   worktree="$(lock_read_field "$path" worktree 2>/dev/null || true)"
@@ -90,13 +277,43 @@ lock_status() {
     return
   fi
 
-  window="$(lock_read_field "$path" window 2>/dev/null || true)"
-  if [[ -n "$window" ]] && ! lock_tmux_window_exists "$window"; then
-    printf '%s' "stale"
-    return
-  fi
+  while IFS=$'\t' read -r scope state detail; do
+    [[ -n "$scope" ]] || continue
+    case "$state" in
+      present)
+        has_runtime_metadata="true"
+        has_present="true"
+        ;;
+      suspicious)
+        has_runtime_metadata="true"
+        has_suspicious="true"
+        ;;
+      unknown)
+        has_runtime_metadata="true"
+        has_unknown="true"
+        ;;
+      absent)
+        has_runtime_metadata="true"
+        has_absent="true"
+        ;;
+      skipped)
+        ;;
+    esac
+  done < <(lock_runtime_evidence_lines "$path")
 
-  printf '%s' "active"
+  if [[ "$has_suspicious" == "true" ]]; then
+    printf '%s' "suspicious"
+  elif [[ "$has_absent" == "true" && "$has_present" == "true" ]]; then
+    printf '%s' "suspicious"
+  elif [[ "$has_present" == "true" ]]; then
+    printf '%s' "active"
+  elif [[ "$has_unknown" == "true" ]]; then
+    printf '%s' "suspicious"
+  elif [[ "$has_runtime_metadata" == "true" && "$has_absent" == "true" ]]; then
+    printf '%s' "stale"
+  else
+    printf '%s' "active"
+  fi
 }
 
 lock_owner_summary() {
@@ -176,6 +393,58 @@ lock_specs_inline() {
     fi
     printf '%s:%s' "$type" "$id"
   done <<< "$specs"
+}
+
+lock_window_declared_specs() {
+  local window="$1"
+  local inline entry type id rest
+  [[ -n "$window" ]] || return 0
+  command -v tmux >/dev/null 2>&1 || return 0
+  inline="$(tmux show-option -wv -t "$window" '@workspace_locks' 2>/dev/null || true)"
+  [[ -n "$inline" ]] || return 0
+
+  rest="$inline"
+  while true; do
+    if [[ "$rest" == *,* ]]; then
+      entry="${rest%%,*}"
+      rest="${rest#*,}"
+    else
+      entry="$rest"
+      rest=""
+    fi
+    entry="${entry#"${entry%%[![:space:]]*}"}"
+    entry="${entry%"${entry##*[![:space:]]}"}"
+    if [[ -n "$entry" && "$entry" == *:* ]]; then
+      type="${entry%%:*}"
+      id="${entry#*:}"
+      [[ -n "$type" && -n "$id" ]] && printf '%s%s%s\n' "$type" "$LOCK_SEP" "$id"
+    fi
+    [[ -n "$rest" ]] || break
+  done
+}
+
+lock_declared_discrepancies_for_window() {
+  local window="$1"
+  local worktree="$2"
+  local type id path owner resource
+  [[ -n "$window" ]] || return 0
+  if [[ -n "$worktree" && -d "$worktree" ]]; then
+    worktree="$(cd "$worktree" && pwd)"
+  fi
+
+  while IFS=$'\x1f' read -r type id; do
+    [[ -n "$type" && -n "$id" ]] || continue
+    path="$(lock_path_for "$type" "$id")"
+    resource="$type:$id"
+    if [[ ! -d "$path" ]]; then
+      printf '%s\tmissing\tdeclared by tmux @workspace_locks but no lock file exists\n' "$resource"
+      continue
+    fi
+    owner="$(lock_read_field "$path" worktree 2>/dev/null || true)"
+    if [[ -n "$worktree" && "$owner" != "$worktree" ]]; then
+      printf '%s\towner-mismatch\tdeclared by window but lock owner is %s\n' "$resource" "${owner:--}"
+    fi
+  done < <(lock_window_declared_specs "$window")
 }
 
 lock_print_dry_run_plan() {
@@ -418,7 +687,8 @@ workspace_acquire_locks_from_specs() {
 
 lock_summary_for_worktree() {
   local worktree="$1"
-  local active=0 stale=0 total=0 path owner state
+  local window="${2:-}"
+  local active=0 stale=0 suspicious=0 total=0 missing=0 declared_conflict=0 path owner state resource discrepancy detail
   [[ -n "$worktree" ]] || { printf '%s' "-"; return; }
   if [[ -d "$worktree" ]]; then
     worktree="$(cd "$worktree" && pwd)"
@@ -431,21 +701,36 @@ lock_summary_for_worktree() {
     case "$state" in
       active) active=$((active + 1)) ;;
       stale) stale=$((stale + 1)) ;;
+      suspicious) suspicious=$((suspicious + 1)) ;;
     esac
   done < <(lock_each_path)
 
-  if [[ "$total" -eq 0 ]]; then
+  while IFS=$'\t' read -r resource discrepancy detail; do
+    [[ -n "$resource" ]] || continue
+    case "$discrepancy" in
+      missing) missing=$((missing + 1)) ;;
+      owner-mismatch) declared_conflict=$((declared_conflict + 1)) ;;
+    esac
+  done < <(lock_declared_discrepancies_for_window "$window" "$worktree")
+
+  if [[ "$total" -eq 0 && "$missing" -eq 0 && "$declared_conflict" -eq 0 ]]; then
     printf '%s' "-"
-  elif [[ "$stale" -gt 0 ]]; then
-    printf 'active:%d stale:%d' "$active" "$stale"
   else
-    printf 'active:%d' "$active"
+    local summary=""
+    [[ "$active" -gt 0 ]] && summary="${summary}active:$active "
+    [[ "$stale" -gt 0 ]] && summary="${summary}stale:$stale "
+    [[ "$suspicious" -gt 0 ]] && summary="${summary}suspicious:$suspicious "
+    [[ "$missing" -gt 0 ]] && summary="${summary}missing:$missing "
+    [[ "$declared_conflict" -gt 0 ]] && summary="${summary}owner-mismatch:$declared_conflict "
+    printf '%s' "$(printf '%s' "$summary" | one_line)"
   fi
 }
 
 workspace_report_resource_locks() {
   local worktree="$1"
-  local path owner state resource created workspace profile any="false"
+  local window="${2:-}"
+  local path owner state resource created workspace profile evidence any="false"
+  local missing_any="false" discrepancy detail
   if [[ -n "$worktree" && -d "$worktree" ]]; then
     worktree="$(cd "$worktree" && pwd)"
   fi
@@ -453,6 +738,16 @@ workspace_report_resource_locks() {
   cat <<'EOF'
 ## Resource Locks
 
+EOF
+
+  cat <<'EOF'
+Active locks are released by `orch-runtime workspace stop` / `workspace clean`.
+Stale locks require `orch-runtime lock release-stale <type> <id>`. Suspicious
+locks need manual inspection; after confirming the runtime is gone, release with
+`orch-runtime lock release <type> <id> --worktree <owner-worktree>`.
+
+| Resource | Status | Owner | Created | Runtime Evidence |
+|---|---|---|---|---|
 EOF
 
   while IFS= read -r path; do
@@ -464,11 +759,31 @@ EOF
     created="$(lock_read_field "$path" created_at 2>/dev/null || true)"
     workspace="$(lock_read_field "$path" workspace 2>/dev/null || true)"
     profile="$(lock_read_field "$path" profile 2>/dev/null || true)"
-    printf -- '- %s: %s (workspace=%s profile=%s created_at=%s)\n' "$resource" "$state" "${workspace:--}" "${profile:--}" "${created:--}"
+    evidence="$(lock_runtime_evidence_summary "$path")"
+    printf "| \`%s\` | \`%s\` | workspace=%s profile=%s | \`%s\` | %s |\n" \
+      "$resource" \
+      "$state" \
+      "$(markdown_cell "${workspace:--}" 32)" \
+      "$(markdown_cell "${profile:--}" 32)" \
+      "$(markdown_cell "${created:--}" 32)" \
+      "$(markdown_cell "$evidence" 160)"
   done < <(lock_each_path)
 
   if [[ "$any" != "true" ]]; then
-    printf -- '- none\n'
+    printf "%s\n" "| - | \`none\` | - | - | - |"
+  fi
+
+  while IFS=$'\t' read -r resource discrepancy detail; do
+    [[ -n "$resource" ]] || continue
+    if [[ "$missing_any" != "true" ]]; then
+      printf '\n### Runtime-Declared Lock Discrepancies\n\n'
+      missing_any="true"
+    fi
+    printf -- "- \`%s\`: \`%s\` (%s)\n" "$resource" "$discrepancy" "$(printf '%s' "$detail" | one_line)"
+  done < <(lock_declared_discrepancies_for_window "$window" "$worktree")
+
+  if [[ "$missing_any" == "true" ]]; then
+    printf '\nRestart the workspace or acquire the missing lock before using the guarded resource.\n'
   fi
   printf '\n'
 }
@@ -495,8 +810,8 @@ EOF
     esac
   done
 
-  printf '%-28s %-8s %-20s %-12s %s\n' "RESOURCE" "STATUS" "WORKSPACE" "PROFILE" "WORKTREE"
-  local path resource status workspace profile worktree
+  printf '%-28s %-11s %-20s %-12s %-64s %s\n' "RESOURCE" "STATUS" "WORKSPACE" "PROFILE" "EVIDENCE" "WORKTREE"
+  local path resource status workspace profile worktree evidence
   while IFS= read -r path; do
     worktree="$(lock_read_field "$path" worktree 2>/dev/null || true)"
     [[ -z "$worktree_filter" || "$worktree" == "$worktree_filter" ]] || continue
@@ -504,7 +819,8 @@ EOF
     status="$(lock_status "$path")"
     workspace="$(lock_read_field "$path" workspace 2>/dev/null || true)"
     profile="$(lock_read_field "$path" profile 2>/dev/null || true)"
-    printf '%-28s %-8s %-20s %-12s %s\n' "$resource" "$status" "${workspace:--}" "${profile:--}" "${worktree:--}"
+    evidence="$(truncate_text "$(lock_runtime_evidence_summary "$path")" 64)"
+    printf '%-28s %-11s %-20s %-12s %-64s %s\n' "$resource" "$status" "${workspace:--}" "${profile:--}" "$evidence" "${worktree:--}"
   done < <(lock_each_path)
 }
 
