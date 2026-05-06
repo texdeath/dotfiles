@@ -366,6 +366,118 @@ workspace_report_terraform_plan() {
   echo
 }
 
+workspace_report_processor_section() {
+  # Surface processor watcher state from .orchestrate/logs/<service>.log.
+  # The 4 watchers (worker / queue-status / gpu-status / model-cache-check)
+  # emit one structured JSON line per cycle. We tail the last non-empty line
+  # per watcher and surface key metrics (state + service-specific numbers).
+  #
+  # Section is silent when no watcher log is present (graceful fallback for
+  # non-processor worktrees and processor worktrees that have not yet started
+  # services). Worker is reported as "running" with the latest ERROR / Traceback
+  # line if any; the watchers are reported with their declared state field.
+  local worktree="$1"
+  local logs_dir="$worktree/.orchestrate/logs"
+  local has_any="false"
+  local svc
+
+  for svc in queue-status gpu-status model-cache-check worker; do
+    if [[ -f "$logs_dir/$svc.log" ]]; then
+      has_any="true"
+      break
+    fi
+  done
+  [[ "$has_any" == "true" ]] || return 0
+
+  echo "## Processor Watchers"
+  echo
+  echo "| Service | State | Latest |"
+  echo "|---|---|---|"
+
+  local log_file last_line last_line_unwrapped state metric_summary last_error
+  for svc in worker queue-status gpu-status model-cache-check; do
+    log_file="$logs_dir/$svc.log"
+    if [[ ! -f "$log_file" ]]; then
+      printf '| `%s` | `not-started` | log not found |\n' "$svc"
+      continue
+    fi
+    # Last non-empty line. tac is GNU; macOS uses tail -r. Fallback to a
+    # bounded tail+grep to keep the helper portable.
+    if command -v tac >/dev/null 2>&1; then
+      last_line="$(tac "$log_file" 2>/dev/null | grep -m 1 -v '^[[:space:]]*$' || true)"
+    elif command -v tail >/dev/null 2>&1; then
+      last_line="$(tail -n 50 "$log_file" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1 || true)"
+    else
+      last_line=""
+    fi
+
+    if [[ -z "$last_line" ]]; then
+      printf '| `%s` | `idle` | no output yet |\n' "$svc"
+      continue
+    fi
+
+    # When started via `devbox services up` (process-compose), each watcher
+    # JSON line is wrapped as {"level":"info","process":"<svc>","replica":0,
+    # "message":"<raw watcher JSON>"}. We unwrap the message field so
+    # downstream parsers see the watcher's own schema. When the watcher is
+    # invoked directly (no process-compose wrapper), the line is already the
+    # raw JSON and we pass it through unchanged.
+    last_line_unwrapped="$(printf '%s' "$last_line" | ruby -rjson -e '
+input = STDIN.read
+begin
+  d = JSON.parse(input)
+  if d.is_a?(Hash) && d.key?("message") && d.key?("level") && d.key?("process")
+    print d["message"]
+  else
+    print input
+  end
+rescue
+  print input
+end
+' 2>/dev/null)"
+
+    case "$svc" in
+      worker)
+        # worker emits free-form log lines (gpu_processor.main); surface the
+        # most recent ERROR / Traceback / CRITICAL marker if any. The watcher
+        # itself does not emit JSON, so we cannot extract a state field; we
+        # default to "running" when the log has any output.
+        if command -v tac >/dev/null 2>&1; then
+          last_error="$(tac "$log_file" 2>/dev/null | grep -m 1 -E "ERROR|Traceback|CRITICAL" || true)"
+        else
+          last_error="$(tail -n 200 "$log_file" 2>/dev/null | grep -E "ERROR|Traceback|CRITICAL" | tail -n 1 || true)"
+        fi
+        if [[ -n "$last_error" ]]; then
+          printf '| `%s` | `%s` | %s |\n' \
+            "$svc" "running" \
+            "latest_error: $(markdown_cell "$last_error" 96)"
+        else
+          printf '| `%s` | `%s` | %s |\n' "$svc" "running" "no recent ERROR"
+        fi
+        ;;
+      queue-status|gpu-status|model-cache-check)
+        state="$(printf '%s' "$last_line_unwrapped" | ruby -rjson -e 'begin; d = JSON.parse(STDIN.read); puts d["state"] || "unknown"; rescue; puts "parse-error"; end' 2>/dev/null)"
+        case "$svc" in
+          queue-status)
+            metric_summary="$(printf '%s' "$last_line_unwrapped" | ruby -rjson -e 'begin; d = JSON.parse(STDIN.read); um = d["undelivered_messages"]; age = d["oldest_unacked_age_seconds"]; printf("undelivered=%s oldest_age=%s", um.nil? ? "?" : um, age.nil? ? "null" : age); rescue; print "n/a"; end' 2>/dev/null)"
+            ;;
+          gpu-status)
+            metric_summary="$(printf '%s' "$last_line_unwrapped" | ruby -rjson -e 'begin; d = JSON.parse(STDIN.read); used = d["memory_used_mib"]; total = d["memory_total_mib"]; util = d["utilization_percent"]; dev = d["device"]; printf("device=%s mem=%s/%sMiB util=%s", dev || "?", used.nil? ? "?" : used, total.nil? ? "?" : total, util.nil? ? "?" : util); rescue; print "n/a"; end' 2>/dev/null)"
+            ;;
+          model-cache-check)
+            metric_summary="$(printf '%s' "$last_line_unwrapped" | ruby -rjson -e 'begin; d = JSON.parse(STDIN.read); size = d["total_size_bytes"]; free = d["free_space_bytes"]; count = d["model_count"]; dups = d["duplicate_warnings"]; dup_count = (dups.is_a?(Array) ? dups.size : 0); printf("models=%s size=%sB free=%sB dups=%s", count.nil? ? "?" : count, size.nil? ? "?" : size, free.nil? ? "?" : free, dup_count); rescue; print "n/a"; end' 2>/dev/null)"
+            ;;
+        esac
+        printf '| `%s` | `%s` | %s |\n' \
+          "$svc" \
+          "${state:-unknown}" \
+          "$(markdown_cell "$metric_summary" 96)"
+        ;;
+    esac
+  done
+  echo
+}
+
 workspace_report_state_counts() {
   local window_target="$1"
   local lines="$2"

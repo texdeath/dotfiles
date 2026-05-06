@@ -143,9 +143,23 @@ assert_eq "6" "$count" "append mode should keep merge behaviour"
 
 rm -f "$worktree_a/.orchestrate/env"
 
-cmd_workspace_start processor "$worktree_a" --dry-run >"$TMP_ROOT/workspace-dry-run.out"
+preflight="$TMP_ROOT/preflight-processor.sh"
+cat > "$preflight" <<'SH'
+#!/usr/bin/env sh
+exit 0
+SH
+chmod +x "$preflight"
+ORCHESTRATE_PREFLIGHT_PROCESSOR="$preflight" cmd_workspace_start test-processor "$worktree_a" --dry-run >"$TMP_ROOT/workspace-dry-run.out"
 grep -q "# resource_locks=5" "$TMP_ROOT/workspace-dry-run.out" || fail "workspace dry-run did not report lock declarations"
 grep -q "# lock gpu:0 -> available" "$TMP_ROOT/workspace-dry-run.out" || fail "workspace dry-run did not check gpu lock"
+grep -q "# preflight:" "$TMP_ROOT/workspace-dry-run.out" || fail "workspace dry-run did not report resolved preflight"
+
+if ( ORCHESTRATE_PREFLIGHT_PROCESSOR="$TMP_ROOT/missing-preflight" cmd_workspace_start test-processor "$worktree_a" --dry-run ) >"$TMP_ROOT/workspace-dry-run-invalid.out" 2>"$TMP_ROOT/workspace-dry-run-invalid.err"; then
+  fail "workspace dry-run should hard-fail when ORCHESTRATE_PREFLIGHT_PROCESSOR is invalid"
+fi
+grep -q "ORCHESTRATE_PREFLIGHT_PROCESSOR is set but not executable" "$TMP_ROOT/workspace-dry-run-invalid.err" \
+  || fail "workspace dry-run invalid override error missing"
+unset ORCHESTRATE_PREFLIGHT_PROCESSOR
 
 workspace_acquire_locks_from_specs "$specs" "processor" "$worktree_a" "workspace-a" "@missing-window" || fail "workspace lock acquire failed"
 summary="$(lock_summary_for_worktree "$worktree_a")"
