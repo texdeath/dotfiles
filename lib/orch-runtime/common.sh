@@ -32,6 +32,7 @@ Usage:
   orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--once]
   orch-runtime workspace stop <workspace> [--archive-logs] [--keep-window] [--force]
   orch-runtime workspace clean <workspace> [--detect-only] [--force]
+  orch-runtime workspace group <create|add|status|report|stop> ...
   orch-runtime lock list [--worktree path]
   orch-runtime lock check <type> <id>
   orch-runtime lock acquire <type> <id> [--workspace name] [--profile id] [--worktree path]
@@ -74,6 +75,7 @@ Examples:
   orch-runtime workspace report <workspace> -n 100
   orch-runtime workspace open <workspace> --print
   orch-runtime workspace watch <workspace>
+  orch-runtime workspace group create feature-foo --env BACKEND_URL=http://localhost:8080
   orch-runtime lock list
 EOF
 }
