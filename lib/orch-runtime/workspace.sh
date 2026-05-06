@@ -629,7 +629,7 @@ EOF
   is_positive_int "$lines" || die "line count must be a positive integer"
   need_tmux
 
-  local window_target name session_name profile pane_total first_path timestamp
+  local window_target name session_name profile pane_total first_path timestamp metrics_worktree
   local branch
   window_target="$(workspace_resolve_window "$needle")"
   name="$(tmux display-message -p -t "$window_target" '#{window_name}')"
@@ -637,10 +637,12 @@ EOF
   profile="$(workspace_window_profile_from_meta "$window_target")"
   pane_total="$(tmux list-panes -t "$window_target" -F '.' 2>/dev/null | wc -l | tr -d ' ')"
   first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
+  metrics_worktree="$(workspace_window_canonical_worktree "$window_target" 2>/dev/null || true)"
+  metrics_worktree="${metrics_worktree:-$first_path}"
   branch="$(workspace_git_branch "$first_path")"
   timestamp="$(date '+%Y-%m-%d %H:%M:%S %Z')"
 
-  metrics_emit_event "$first_path" "$name" "workspace_report" \
+  metrics_emit_event "$metrics_worktree" "$name" "workspace_report" \
     "profile=$profile" \
     "session=$session_name" \
     "window=$window_target" \

@@ -14,6 +14,7 @@ fail() {
 }
 
 command -v jq >/dev/null 2>&1 || fail "jq is required for JSONL parse checks"
+command -v ruby >/dev/null 2>&1 || fail "ruby is required for metrics serialization"
 
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/orch-runtime-metrics-test.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
@@ -56,6 +57,9 @@ jq -s -e '
   length == 5 and
   .[2].event == "ai_asking" and
   .[2].data.signal_key == "pane:%2" and
+  .[2].data.detail_hash and
+  .[2].data.detail_bytes and
+  (.[] | select(.event == "ai_asking") | .data.detail | not) and
   .[3].event == "dev_server_crash" and
   .[4].event == "test_failure" and
   all(.[]; (.ts | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")))

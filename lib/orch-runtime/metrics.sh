@@ -11,6 +11,26 @@ metrics_events_file() {
   printf '%s/.orchestrate/events.jsonl' "$worktree"
 }
 
+metrics_append_line() {
+  local file="$1"
+  local line="$2"
+  local lock_dir="${file}.lock"
+  local acquired="false"
+  local _
+
+  for _ in {1..50}; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      acquired="true"
+      break
+    fi
+    sleep 0.05
+  done
+
+  [[ "$acquired" == "true" ]] || return 0
+  printf '%s\n' "$line" >> "$file" 2>/dev/null || true
+  rmdir "$lock_dir" 2>/dev/null || true
+}
+
 metrics_emit_event() {
   [[ $# -ge 3 ]] || return 0
   local worktree="$1"
@@ -22,14 +42,15 @@ metrics_emit_event() {
   [[ -n "$worktree" && -n "$workspace" && -n "$event" ]] || return 0
   [[ -d "$worktree" ]] || return 0
 
-  local orchestrate_dir file ts
+  local orchestrate_dir file ts payload
   orchestrate_dir="$worktree/.orchestrate"
   file="$(metrics_events_file "$worktree")" || return 0
   command -v ruby >/dev/null 2>&1 || return 0
   mkdir -p "$orchestrate_dir" 2>/dev/null || return 0
   ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-  ruby -rjson - "$ts" "$workspace" "$event" "$@" >> "$file" <<'RUBY' || return 0
+  payload="$(
+    ruby -rjson - "$ts" "$workspace" "$event" "$@" <<'RUBY'
 ts = ARGV.shift
 workspace = ARGV.shift
 event = ARGV.shift
@@ -48,7 +69,14 @@ puts JSON.generate({
   "data" => data
 })
 RUBY
+  )" || return 0
+  [[ -n "$payload" ]] || return 0
+  metrics_append_line "$file" "$payload"
   return 0
+}
+
+metrics_hash_text() {
+  cksum | awk '{print $1 ":" $2}'
 }
 
 metrics_watch_event_kind() {
@@ -98,11 +126,15 @@ metrics_emit_watch_signal() {
   local detail="$7"
 
   local event
+  local detail_hash detail_bytes
   event="$(metrics_watch_event_kind "$category" "$status" "$detail")" || return 0
+  detail_hash="$(printf '%s' "$detail" | metrics_hash_text)"
+  detail_bytes="$(printf '%s' "$detail" | wc -c | tr -d ' ')"
   metrics_emit_event "$worktree" "$workspace" "$event" \
     "window=$window_target" \
     "signal_key=$key" \
     "category=$category" \
     "status=$status" \
-    "detail=$detail"
+    "detail_hash=$detail_hash" \
+    "detail_bytes=$detail_bytes"
 }
