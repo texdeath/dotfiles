@@ -4,11 +4,13 @@
 WORKSPACE_WATCH_DEFAULT_INTERVAL=5
 WORKSPACE_WATCH_DEFAULT_STALE_SECONDS=300
 WORKSPACE_WATCH_DEFAULT_COMPOSE_TIMEOUT=8
+WORKSPACE_WATCH_DEFAULT_NOTIFY_STATUSES="alert,stale,unknown"
+WORKSPACE_WATCH_DEFAULT_NOTIFY_TIMEOUT=3
 
 workspace_watch_usage() {
   cat <<'EOF'
 Usage:
-  orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--log-file path] [--once]
+  orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--log-file path] [--notify-statuses list] [--no-notify] [--once]
 
 Continuously inspect a workspace tmux window and print a summary when runtime
 signals change. Signals cover AI panes waiting for input, stopped dev/API panes,
@@ -21,7 +23,15 @@ Options:
   -i, --interval seconds    poll interval (default: 5)
   --stale-seconds seconds   unchanged output threshold (default: 300)
   --log-file path           append emitted summaries to a log file
+  --notify-statuses list    comma-separated statuses to notify (default: alert,stale,unknown)
+  --no-notify               disable notifications for important signal changes
   --once                    print one snapshot and exit
+
+Notification environment:
+  ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_STATUSES  default notification statuses
+  ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_COMMAND   executable called as <title> <message>
+  ORCH_RUNTIME_WORKSPACE_WATCH_WEBHOOK_URL      Slack-compatible incoming webhook URL
+  ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_TIMEOUT   command/webhook timeout seconds
 EOF
 }
 
@@ -62,7 +72,7 @@ workspace_watch_pane_role() {
 
   haystack="$(lower "$command $title $path $(printf '%s\n' "$screen" | tail -80)")"
   case "$haystack" in
-    *typecheck* | *"tsc "* | *" tsc"* | *"test "* | *" test"* | *vitest* | *jest* | *pytest* | *"go test"* | *rspec* | *"cargo test"*)
+    *typecheck* | *"tsc "* | *" tsc"* | *"test "* | *" test"* | *vitest* | *jest* | *pytest* | *rspec*)
       echo "test"
       ;;
     *"compose logs"* | *"docker logs"* | *" logs"*)
@@ -74,7 +84,7 @@ workspace_watch_pane_role() {
     *"docker compose"* | *"compose ps"* | *container*)
       echo "compose"
       ;;
-    *" run dev"* | *"npm run dev"* | *"pnpm dev"* | *"yarn dev"* | *vite* | *"next dev"* | *"rails s"* | *"rails server"* | *"dev server"* | *" api"* | *"/api"* | *"server listening"* | *"listening on"* | *"localhost:"*)
+    *" run dev"* | *"pnpm dev"* | *"yarn dev"* | *vite* | *"next dev"* | *"rails s"* | *"dev server"* | *" api"* | *"/api"* | *"server listening"* | *"listening on"* | *"localhost:"*)
       echo "dev"
       ;;
     *)
@@ -203,6 +213,7 @@ workspace_watch_compose_signal() {
 
   compose_rc=0
   compose_output="$(
+    # shellcheck disable=SC2016
     workspace_watch_run_with_timeout "$timeout_seconds" bash -c '
       cd "$1" || exit 1
       # shellcheck disable=SC2046
@@ -333,6 +344,88 @@ workspace_watch_record_changed() {
   [[ "$previous_status" != "$status" || "$previous_detail" != "$detail" ]]
 }
 
+workspace_watch_notify_command_available() {
+  local notify_command="${ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_COMMAND:-}"
+
+  [[ -n "$notify_command" ]] || return 1
+  command -v "$notify_command" >/dev/null 2>&1
+}
+
+workspace_watch_json_payload() {
+  local text="$1"
+  if command -v ruby >/dev/null 2>&1; then
+    ruby -rjson -e 'print JSON.generate({"text" => ARGV[0]})' "$text"
+    return
+  fi
+
+  text="${text//\\/\\\\}"
+  text="${text//\"/\\\"}"
+  text="${text//$'\n'/ }"
+  printf '{"text":"%s"}' "$text"
+}
+
+workspace_watch_send_webhook_notification() {
+  local message="$1"
+  local timeout_seconds="$2"
+  local webhook_url="${ORCH_RUNTIME_WORKSPACE_WATCH_WEBHOOK_URL:-}"
+  local payload
+
+  [[ -n "$webhook_url" ]] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  payload="$(workspace_watch_json_payload "$message")"
+  workspace_watch_run_with_timeout "$timeout_seconds" \
+    curl -fsS -m "$timeout_seconds" -H 'Content-Type: application/json' -d "$payload" "$webhook_url" \
+    >/dev/null 2>&1 || true
+}
+
+workspace_watch_send_notification() {
+  local workspace="$1"
+  local window_target="$2"
+  local key="$3"
+  local category="$4"
+  local status="$5"
+  local detail="$6"
+  local title message notify_command timeout_seconds
+
+  title="orch-runtime workspace: $status"
+  message="$(truncate_text "$workspace $key $status: $detail" 180)"
+  notify_command="${ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_COMMAND:-}"
+  timeout_seconds="${ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_TIMEOUT:-$WORKSPACE_WATCH_DEFAULT_NOTIFY_TIMEOUT}"
+  is_positive_int "$timeout_seconds" || timeout_seconds="$WORKSPACE_WATCH_DEFAULT_NOTIFY_TIMEOUT"
+
+  if workspace_watch_notify_command_available; then
+    ORCH_RUNTIME_NOTIFY_WORKSPACE="$workspace" \
+      ORCH_RUNTIME_NOTIFY_WINDOW="$window_target" \
+      ORCH_RUNTIME_NOTIFY_KEY="$key" \
+      ORCH_RUNTIME_NOTIFY_CATEGORY="$category" \
+      ORCH_RUNTIME_NOTIFY_STATUS="$status" \
+      ORCH_RUNTIME_NOTIFY_DETAIL="$detail" \
+      workspace_watch_run_with_timeout "$timeout_seconds" "$notify_command" "$title" "$message" >/dev/null 2>&1 || true
+  fi
+
+  workspace_watch_send_webhook_notification "$message" "$timeout_seconds"
+  send_notification "$title" "$message"
+}
+
+workspace_watch_notify_changed() {
+  local workspace="$1"
+  local window_target="$2"
+  local current="$3"
+  local previous="$4"
+  local notify_statuses="$5"
+
+  local key category status detail hash changed_at
+
+  [[ -s "$previous" ]] || return 0
+
+  while IFS=$'\t' read -r key category status detail hash changed_at; do
+    [[ -n "$key" ]] || continue
+    workspace_watch_record_changed "$previous" "$key" "$status" "$detail" || continue
+    state_in_list "$status" "$notify_statuses" || continue
+    workspace_watch_send_notification "$workspace" "$window_target" "$key" "$category" "$status" "$detail"
+  done < "$current"
+}
+
 workspace_watch_emit_summary() {
   local workspace="$1"
   local window_target="$2"
@@ -387,6 +480,8 @@ cmd_workspace_watch() {
   local interval="$WORKSPACE_WATCH_DEFAULT_INTERVAL"
   local stale_seconds="$WORKSPACE_WATCH_DEFAULT_STALE_SECONDS"
   local once="false"
+  local notify="true"
+  local notify_statuses="${ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_STATUSES:-$WORKSPACE_WATCH_DEFAULT_NOTIFY_STATUSES}"
   local log_file=""
 
   while [[ $# -gt 0 ]]; do
@@ -410,6 +505,15 @@ cmd_workspace_watch() {
         [[ $# -ge 2 ]] || die "$1 requires a value"
         log_file="$2"
         shift 2
+        ;;
+      --notify-statuses)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        notify_statuses="$2"
+        shift 2
+        ;;
+      --no-notify)
+        notify="false"
+        shift
         ;;
       --once)
         once="true"
@@ -461,7 +565,11 @@ cmd_workspace_watch() {
     : > "$current"
     workspace_watch_snapshot "$window_target" "$lines" "$stale_seconds" "$previous" "$now" "$worktree" > "$current"
     workspace_watch_append_missing_panes "$previous" "$current"
-    workspace_watch_emit_summary "$workspace" "$window_target" "$worktree" "$current" "$previous" "$log_file" "$now_text" "$tmp_out" || true
+    if workspace_watch_emit_summary "$workspace" "$window_target" "$worktree" "$current" "$previous" "$log_file" "$now_text" "$tmp_out"; then
+      if [[ "$notify" == "true" ]]; then
+        workspace_watch_notify_changed "$workspace" "$window_target" "$current" "$previous" "$notify_statuses"
+      fi
+    fi
     cp "$current" "$previous"
     [[ "$once" == "true" ]] && break
     sleep "$interval"

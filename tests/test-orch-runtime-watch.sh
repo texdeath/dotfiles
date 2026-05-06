@@ -33,6 +33,12 @@ screen=$'docker compose up\nservice api unhealthy'
 status="$(workspace_watch_pane_status "compose" "pane" "working" "0" "true" "$screen" "service api unhealthy")"
 [[ "$status" == stale$'\t'* ]] || fail "stale compose pane should report stale: $status"
 
+message="$(pane_status_notification_message "sample:1.1" "claude" "working" "Implementing feature" "Hashing... almost done thinking")"
+[[ "$message" == "sample:1.1 claude is working [Implementing feature]: Hashing... almost done thinking" ]] || fail "pane notify message mismatch: $message"
+
+message="$(pane_status_notification_message "sample:1.2" "-" "idle" "" "$ ")"
+[[ "$message" == "sample:1.2 pane is idle: $ " ]] || fail "generic pane notify message mismatch: $message"
+
 started="$(date '+%s')"
 if workspace_watch_run_with_timeout 1 bash -c 'sleep 3' >/dev/null 2>&1; then
   fail "timeout helper unexpectedly succeeded"
@@ -55,6 +61,55 @@ exit 1
 SH
 chmod +x "$TMP_ROOT/bin/devbox"
 PATH="$TMP_ROOT/bin:$PATH"
+
+notification_log="$TMP_ROOT/notifications.log"
+send_notification() {
+  printf 'mac\t%s\t%s\n' "$1" "$2" >> "$notification_log"
+}
+cat > "$TMP_ROOT/bin/notify-command" <<'SH'
+#!/usr/bin/env bash
+{
+  printf 'command\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$1" "$2" \
+    "${ORCH_RUNTIME_NOTIFY_WORKSPACE:-}" \
+    "${ORCH_RUNTIME_NOTIFY_WINDOW:-}" \
+    "${ORCH_RUNTIME_NOTIFY_KEY:-}" \
+    "${ORCH_RUNTIME_NOTIFY_CATEGORY:-}" \
+    "${ORCH_RUNTIME_NOTIFY_STATUS:-}" \
+    "${ORCH_RUNTIME_NOTIFY_DETAIL:-}"
+} >> "$NOTIFICATION_LOG"
+SH
+chmod +x "$TMP_ROOT/bin/notify-command"
+cat > "$TMP_ROOT/bin/curl" <<'SH'
+#!/usr/bin/env bash
+printf 'webhook\t%s\n' "$*" >> "$NOTIFICATION_LOG"
+SH
+chmod +x "$TMP_ROOT/bin/curl"
+
+export NOTIFICATION_LOG="$notification_log"
+export ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_COMMAND="$TMP_ROOT/bin/notify-command"
+export ORCH_RUNTIME_WORKSPACE_WATCH_WEBHOOK_URL="https://example.invalid/workspace-watch"
+cat > "$TMP_ROOT/watch-prev.tsv" <<'EOF'
+devbox:worker	devbox-service	ok	devbox service worker is running	-	0
+pane:%1	dev	working	dev pane is working	-	0
+EOF
+cat > "$TMP_ROOT/watch-current.tsv" <<'EOF'
+devbox:worker	devbox-service	alert	devbox service worker is unhealthy	-	0
+pane:%1	dev	stale	output has not changed	-	0
+pane:%2	ai	ok	ai pane is working	-	0
+EOF
+workspace_watch_notify_changed "sample-workspace" "sample:1" "$TMP_ROOT/watch-current.tsv" "$TMP_ROOT/watch-prev.tsv" "alert,stale"
+grep -q $'command\torch-runtime workspace: alert' "$notification_log" || fail "notify command did not receive alert"
+grep -q $'command\torch-runtime workspace: stale' "$notification_log" || fail "notify command did not receive stale"
+grep -q $'sample-workspace\tsample:1\tdevbox:worker\tdevbox-service\talert' "$notification_log" || fail "notify command env missing alert context"
+grep -q 'webhook\t.*workspace-watch' "$notification_log" || fail "webhook notification was not attempted"
+grep -q $'mac\torch-runtime workspace: alert' "$notification_log" || fail "mac notification fallback was not called"
+before_count="$(wc -l < "$notification_log" | tr -d ' ')"
+: > "$TMP_ROOT/watch-empty-prev.tsv"
+workspace_watch_notify_changed "sample-workspace" "sample:1" "$TMP_ROOT/watch-current.tsv" "$TMP_ROOT/watch-empty-prev.tsv" "alert,stale"
+after_count="$(wc -l < "$notification_log" | tr -d ' ')"
+[[ "$before_count" == "$after_count" ]] || fail "initial snapshot should not notify"
+unset ORCH_RUNTIME_WORKSPACE_WATCH_NOTIFY_COMMAND ORCH_RUNTIME_WORKSPACE_WATCH_WEBHOOK_URL NOTIFICATION_LOG
 
 cat > "$TMP_ROOT/worktree/devbox.json" <<'JSON'
 {"packages":[]}

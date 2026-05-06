@@ -1339,7 +1339,7 @@ Usage:
   orch-runtime workspace status [-n lines]
   orch-runtime workspace report <workspace> [-n lines]
   orch-runtime workspace open <workspace> [--print]
-  orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--once]
+  orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--log-file path] [--notify-statuses list] [--no-notify] [--once]
   orch-runtime workspace stop <workspace> [--archive-logs] [--keep-window] [--force]
   orch-runtime workspace clean <workspace> [--detect-only] [--force]
   orch-runtime workspace group <create|add|status|report|stop> ...

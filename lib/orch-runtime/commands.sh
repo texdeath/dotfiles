@@ -123,7 +123,6 @@ cmd_watch() {
   local title
   local last
   local previous_state
-  local message
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -193,11 +192,7 @@ EOF
         printf '%s %-7s %-12s %-7s %s -> %s  %s\n' "$timestamp" "$pane" "$tmux_target" "$label" "${previous_state:-new}" "$state" "$last"
 
         if [[ -n "$previous_state" && "$notify" == "true" ]] && state_in_list "$state" "$notify_states"; then
-          message="$tmux_target $label is $state"
-          if [[ -n "$last" ]]; then
-            message="$message: $last"
-          fi
-          send_notification "orch-runtime: $state" "$message"
+          notify_pane_status "$tmux_target" "$label" "$state" "$title" "$last"
         fi
       fi
     done < "$current"
@@ -206,6 +201,59 @@ EOF
     [[ "$once" == "true" ]] && break
     sleep "$interval"
   done
+}
+
+cmd_notify() {
+  local target="all"
+  local target_set="false"
+  local lines="$DEFAULT_LINES"
+  local pane
+  local state
+  local label
+  local tmux_target
+  local title
+  local last
+  local count=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n|--lines)
+        [[ $# -ge 2 ]] || die "$1 requires a value"
+        lines="$2"
+        shift 2
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  orch-runtime notify [pane|claude|codex|all] [-n lines]
+
+Send a one-shot desktop notification with the current pane state.
+EOF
+        return
+        ;;
+      -*)
+        die "unknown option for notify: $1"
+        ;;
+      *)
+        [[ "$target_set" == "false" ]] || die "notify accepts at most one target"
+        target="$1"
+        target_set="true"
+        shift
+        ;;
+    esac
+  done
+
+  is_positive_int "$lines" || die "line count must be a positive integer"
+  need_tmux
+
+  while IFS=$'\t' read -r pane state label tmux_target title last; do
+    [[ -n "$pane" ]] || continue
+    notify_pane_status "$tmux_target" "$label" "$state" "$title" "$last"
+    printf 'notified %-7s %-12s %-7s %-8s %s\n' "$pane" "$tmux_target" "$label" "$state" "$last"
+    count=$((count + 1))
+  done < <(watch_rows "$target" "$lines")
+
+  [[ "$count" -gt 0 ]] || die "notify found no panes for target: $target"
 }
 
 cmd_focus() {

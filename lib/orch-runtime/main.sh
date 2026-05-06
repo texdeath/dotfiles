@@ -24,6 +24,9 @@ main() {
       need_tmux
       cmd_status "$@"
       ;;
+    notify)
+      cmd_notify "$@"
+      ;;
     watch)
       cmd_watch "$@"
       ;;
