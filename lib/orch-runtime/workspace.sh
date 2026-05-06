@@ -39,16 +39,21 @@ workspace_resolve_loader() {
 }
 
 workspace_resolve_preflight_processor() {
-  # Resolve the orchestrate preflight-processor.sh path. Returns 0 with the
-  # path on stdout when found, 1 otherwise. The caller decides whether
-  # absence is fatal or skipped (current behaviour: skip with warning so
-  # non-processor environments are unaffected).
+  # Resolve the orchestrate preflight-processor.sh path.
+  # Returns:
+  #   0 + path on stdout : found, ready to invoke
+  #   1                  : graceful skip (env unset and no install path matched);
+  #                        caller may warn-and-skip without aborting
+  #   2                  : hard fail (ORCHESTRATE_PREFLIGHT_PROCESSOR explicitly
+  #                        set but not executable). The user signalled an
+  #                        override; silently skipping would let the processor
+  #                        gate disappear without notice, so the caller must die.
   if [[ -n "${ORCHESTRATE_PREFLIGHT_PROCESSOR:-}" ]]; then
     if [[ -x "$ORCHESTRATE_PREFLIGHT_PROCESSOR" ]]; then
       printf '%s' "$ORCHESTRATE_PREFLIGHT_PROCESSOR"
       return 0
     fi
-    return 1
+    return 2
   fi
 
   local resolved
@@ -518,7 +523,23 @@ EOF
     fi
     case "$profile" in
       *-processor)
-        printf '# preflight-processor.sh %q (dry-run; would hard-fail if required env is missing)\n' "$worktree"
+        local dry_preflight_bin dry_preflight_rc
+        dry_preflight_rc=0
+        dry_preflight_bin="$(workspace_resolve_preflight_processor)" || dry_preflight_rc=$?
+        case "$dry_preflight_rc" in
+          0)
+            printf '# preflight: %q %q (dry-run; hard-fails on missing required env)\n' "$dry_preflight_bin" "$worktree"
+            ;;
+          1)
+            printf '# preflight skip (dry-run): preflight-processor.sh not found via PATH / install paths (graceful)\n'
+            ;;
+          2)
+            die "workspace start: ORCHESTRATE_PREFLIGHT_PROCESSOR is set but not executable: ${ORCHESTRATE_PREFLIGHT_PROCESSOR:-}"
+            ;;
+          *)
+            die "workspace start: failed to resolve preflight-processor.sh (rc=$dry_preflight_rc)"
+            ;;
+        esac
         ;;
     esac
     printf 'tmux send-keys -t %q %q Enter\n' "$window_target" "# pane 0: ${names[0]} (cwd=${effective_cwds[0]})"
@@ -547,25 +568,49 @@ EOF
   # Processor profiles must pass preflight before any pane runs `devbox services
   # up`. We resolve preflight-processor.sh via the orchestrate helper search
   # path (env override → PATH → ~/.claude/orchestrate/bin → ~/bin/orchestrate).
-  # On failure we release the locks acquired above and kill the empty window so
-  # the operator can retry cleanly. When the script is missing entirely (e.g.
-  # mismatched orchestrate install), we warn and skip rather than die so
-  # non-processor environments are unaffected.
+  # On preflight failure or hard-fail we release locks scoped to *this window*
+  # (sibling windows on the same worktree may hold idempotent re-acquired
+  # locks) and kill the empty window so the operator can retry cleanly.
+  # rc dispatch:
+  #   0 - preflight resolved; run it and die on non-zero exit
+  #   1 - preflight script missing in graceful paths; warn and skip so
+  #       non-processor environments are unaffected
+  #   2 - ORCHESTRATE_PREFLIGHT_PROCESSOR explicitly set but not executable;
+  #       die so the operator notices the override misconfiguration instead of
+  #       silently dropping the gate
   case "$profile" in
     *-processor)
-      local preflight_bin
-      preflight_bin="$(workspace_resolve_preflight_processor 2>/dev/null || true)"
-      if [[ -n "$preflight_bin" ]]; then
-        if ! "$preflight_bin" "$worktree"; then
+      local preflight_bin preflight_rc
+      preflight_rc=0
+      preflight_bin="$(workspace_resolve_preflight_processor)" || preflight_rc=$?
+      case "$preflight_rc" in
+        0)
+          if ! "$preflight_bin" "$worktree"; then
+            if [[ -n "$lock_specs" ]]; then
+              workspace_release_locks_for_window "$worktree" "$window_target" >&2 || true
+            fi
+            tmux kill-window -t "$window_target" 2>/dev/null || true
+            die "workspace start: preflight-processor.sh failed for profile '$profile' (see stderr above)"
+          fi
+          ;;
+        1)
+          printf 'orch-runtime: preflight-processor.sh not found; skipping preflight check for %s\n' "$profile" >&2
+          ;;
+        2)
           if [[ -n "$lock_specs" ]]; then
-            workspace_release_locks_for_worktree "$worktree" >&2 || true
+            workspace_release_locks_for_window "$worktree" "$window_target" >&2 || true
           fi
           tmux kill-window -t "$window_target" 2>/dev/null || true
-          die "workspace start: preflight-processor.sh failed for profile '$profile' (see stderr above)"
-        fi
-      else
-        printf 'orch-runtime: preflight-processor.sh not found; skipping preflight check for %s\n' "$profile" >&2
-      fi
+          die "workspace start: ORCHESTRATE_PREFLIGHT_PROCESSOR is set but not executable: ${ORCHESTRATE_PREFLIGHT_PROCESSOR:-}"
+          ;;
+        *)
+          if [[ -n "$lock_specs" ]]; then
+            workspace_release_locks_for_window "$worktree" "$window_target" >&2 || true
+          fi
+          tmux kill-window -t "$window_target" 2>/dev/null || true
+          die "workspace start: failed to resolve preflight-processor.sh (rc=$preflight_rc)"
+          ;;
+      esac
       ;;
   esac
 
@@ -924,6 +969,32 @@ workspace_release_locks_for_worktree() {
   done < <(lock_each_path)
   if [[ "$released" -eq 0 ]]; then
     printf '  no active locks for worktree: %s\n' "$worktree"
+  fi
+}
+
+workspace_release_locks_for_window() {
+  # Release active locks owned by the worktree and tagged with the given tmux
+  # window target. Used when a specific workspace start fails (e.g. preflight)
+  # and we must not touch locks held by sibling windows that share the same
+  # worktree.
+  local worktree="$1"
+  local window_target="$2"
+  local released=0 path owner lock_window status resource
+  while IFS= read -r path; do
+    owner="$(lock_read_field "$path" worktree 2>/dev/null || true)"
+    [[ "$owner" == "$worktree" ]] || continue
+    lock_window="$(lock_read_field "$path" window 2>/dev/null || true)"
+    [[ "$lock_window" == "$window_target" ]] || continue
+    status="$(lock_status "$path")"
+    [[ "$status" == "active" ]] || continue
+    resource="$(lock_resource_name "$path")"
+    if lock_release_path "$path"; then
+      printf '  released: %s\n' "$resource"
+      released=$((released + 1))
+    fi
+  done < <(lock_each_path)
+  if [[ "$released" -eq 0 ]]; then
+    printf '  no active locks for worktree/window: %s %s\n' "$worktree" "${window_target:--}"
   fi
 }
 

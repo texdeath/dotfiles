@@ -131,6 +131,29 @@ echo "$stale_release_output" | grep -q "no active locks for worktree:" \
 cmd_lock release-stale gpu 9 >/dev/null
 [[ ! -d "$stale_lock" ]] || fail "stale lock not cleared by release-stale"
 
+# Window-scoped release must not release sibling locks owned by the same
+# worktree. The test overrides tmux window existence so synthetic @window-*
+# targets are considered active without depending on a real tmux session.
+lock_tmux_window_exists() {
+  case "$1" in
+    @window-a|@window-b) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+worktree_window_release="$TMP_ROOT/wt-window-release"
+mkdir -p "$worktree_window_release"
+lock_window_a="$(lock_acquire_one "gpu" "7" "ws-window-a" "processor" "$worktree_window_release" "@window-a")"
+lock_window_b="$(lock_acquire_one "gpu" "8" "ws-window-b" "processor" "$worktree_window_release" "@window-b")"
+[[ -d "$lock_window_a" && -d "$lock_window_b" ]] || fail "locks not created for window release test"
+window_release_output="$(workspace_release_locks_for_window "$worktree_window_release" "@window-a")"
+echo "$window_release_output" | grep -q "released: gpu:7" \
+  || fail "window release output missing target lock (got: $window_release_output)"
+[[ ! -d "$lock_window_a" ]] || fail "target window lock still exists after release"
+[[ -d "$lock_window_b" ]] || fail "sibling window lock should not be released"
+cmd_lock release gpu 8 --worktree "$worktree_window_release" >/dev/null
+[[ ! -d "$lock_window_b" ]] || fail "sibling window lock cleanup failed"
+
 # ─── workspace_stop_docker_compose ────────────────────────────────
 # Without a compose.project marker the helper is a no-op.
 worktree_no_compose="$TMP_ROOT/wt-no-compose"
