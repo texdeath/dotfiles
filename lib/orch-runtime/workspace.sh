@@ -513,6 +513,12 @@ EOF
   tmux select-layout -t "$window_target" tiled
   tmux select-pane -t "${window_target}.${pane_base_index}"
 
+  metrics_emit_event "$worktree" "$window_name" "workspace_start" \
+    "profile=$profile" \
+    "session=$session" \
+    "window=$window_target" \
+    "pane_count=$pane_count"
+
   printf 'workspace started: %s (%s) at %s\n' "$window_name" "$profile" "$worktree"
 }
 
@@ -633,6 +639,13 @@ EOF
   first_path="$(tmux list-panes -t "$window_target" -F '#{pane_current_path}' 2>/dev/null | head -n 1)"
   branch="$(workspace_git_branch "$first_path")"
   timestamp="$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+  metrics_emit_event "$first_path" "$name" "workspace_report" \
+    "profile=$profile" \
+    "session=$session_name" \
+    "window=$window_target" \
+    "pane_count=$pane_total" \
+    "lines=$lines"
 
   cat <<EOF
 # Runtime Report: $name
@@ -1065,8 +1078,10 @@ EOF
   [[ -n "$needle" ]] || die "workspace stop: workspace name is required"
   need_tmux
 
-  local window_target worktree
+  local window_target worktree workspace_name
   window_target="$(workspace_resolve_window "$needle")"
+  workspace_name="$(tmux display-message -p -t "$window_target" '#{window_name}' 2>/dev/null || true)"
+  workspace_name="${workspace_name:-$needle}"
   worktree="$(workspace_resolve_worktree_for_stop "$window_target" "$force")" \
     || die "workspace stop: refusing to stop $needle (use --force to override)"
   [[ -n "$worktree" ]] || die "workspace stop: cannot resolve worktree for $needle"
@@ -1090,6 +1105,12 @@ EOF
   else
     printf '  tmux window kept: %s\n' "$window_target"
   fi
+
+  metrics_emit_event "$worktree" "$workspace_name" "workspace_stop" \
+    "window=$window_target" \
+    "archive_logs=$archive_logs" \
+    "keep_window=$keep_window" \
+    "force=$force"
 }
 
 cmd_workspace_clean() {
@@ -1143,8 +1164,10 @@ EOF
   [[ -n "$needle" ]] || die "workspace clean: workspace name is required"
   need_tmux
 
-  local window_target worktree
+  local window_target worktree workspace_name
   window_target="$(workspace_resolve_window "$needle")"
+  workspace_name="$(tmux display-message -p -t "$window_target" '#{window_name}' 2>/dev/null || true)"
+  workspace_name="${workspace_name:-$needle}"
   worktree="$(workspace_resolve_worktree_for_stop "$window_target" "$force")" \
     || die "workspace clean: refusing to clean $needle (use --force to override)"
   [[ -n "$worktree" ]] || die "workspace clean: cannot resolve worktree for $needle"
@@ -1161,6 +1184,9 @@ EOF
   fi
 
   workspace_clean_residuals_report "$worktree"
+  metrics_emit_event "$worktree" "$workspace_name" "workspace_clean" \
+    "detect_only=$detect_only" \
+    "force=$force"
 }
 
 cmd_workspace() {
