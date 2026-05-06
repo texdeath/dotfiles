@@ -1,2 +1,4 @@
 export PATH="$HOME/.local/share/mise/shims:$HOME/bin:$HOME/.local/bin:$PATH"
+export PNPM_HOME="$HOME/Library/pnpm"
+export PATH="$PNPM_HOME:$PATH"
 . "$HOME/.cargo/env"
