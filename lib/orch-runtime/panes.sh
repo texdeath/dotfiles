@@ -149,7 +149,6 @@ pane_status_line() {
   local active
   local command
   local title
-  local path
   local label
   local screen
   local state
@@ -159,7 +158,6 @@ pane_status_line() {
   active="$(pane_active_text "$(tmux display-message -p -t "$pane" '#{pane_active}')")"
   command="$(tmux display-message -p -t "$pane" '#{pane_current_command}')"
   title="$(tmux display-message -p -t "$pane" '#{pane_title}')"
-  path="$(tmux display-message -p -t "$pane" '#{pane_current_path}')"
   label="$(detect_label "$pane" "$command" "$title")"
   screen="$(capture_pane "$pane" "$STATUS_LINES")"
   state="$(pane_state "$screen")"
@@ -217,11 +215,49 @@ send_notification() {
   local message
 
   [[ "$(uname -s)" == "Darwin" ]] || return 0
+
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier -title "$1" -message "$2" >/dev/null 2>&1 || true
+    return 0
+  fi
+
   [[ -x /usr/bin/osascript ]] || return 0
 
   title="$(osascript_escape "$1")"
   message="$(osascript_escape "$2")"
   /usr/bin/osascript -e "display notification \"$message\" with title \"$title\"" >/dev/null 2>&1 || true
+}
+
+pane_status_notification_message() {
+  local tmux_target="$1"
+  local label="$2"
+  local state="$3"
+  local title="$4"
+  local last="$5"
+  local agent="$label"
+  local message
+
+  [[ "$agent" == "-" || -z "$agent" ]] && agent="pane"
+  message="$tmux_target $agent is $state"
+  if [[ -n "$title" ]]; then
+    message="$message [$title]"
+  fi
+  if [[ -n "$last" ]]; then
+    message="$message: $last"
+  fi
+  truncate_text "$message" 180
+}
+
+notify_pane_status() {
+  local tmux_target="$1"
+  local label="$2"
+  local state="$3"
+  local title="$4"
+  local last="$5"
+  local message
+
+  message="$(pane_status_notification_message "$tmux_target" "$label" "$state" "$title" "$last")"
+  send_notification "orch-runtime: $state" "$message"
 }
 
 paste_to_pane() {

@@ -16,6 +16,7 @@ Usage:
   orch-runtime new [--print] [session]
   orch-runtime panes
   orch-runtime status [pane|claude|codex|all] [-n lines]
+  orch-runtime notify [pane|claude|codex|all] [-n lines]
   orch-runtime watch [pane|claude|codex|all] [-n lines] [-i seconds] [--states asking,error] [--no-notify] [--once]
   orch-runtime digest [pane|claude|codex|all] [-n lines] [note...]
   orch-runtime focus <pane|claude|codex>
@@ -29,7 +30,7 @@ Usage:
   orch-runtime workspace status [-n lines]
   orch-runtime workspace report <workspace> [-n lines]
   orch-runtime workspace open <workspace> [--print]
-  orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--once]
+  orch-runtime workspace watch <workspace> [-n lines] [-i seconds] [--stale-seconds seconds] [--log-file path] [--notify-statuses list] [--no-notify] [--once]
   orch-runtime workspace stop <workspace> [--archive-logs] [--keep-window] [--force]
   orch-runtime workspace clean <workspace> [--detect-only] [--force]
   orch-runtime workspace group <create|add|status|report|stop> ...
@@ -63,6 +64,7 @@ Examples:
   orch-runtime new --print scratch
   orch-runtime panes
   orch-runtime status
+  orch-runtime notify claude
   orch-runtime watch all
   orch-runtime digest claude -n 80 "Summarize where Claude is blocked."
   orch-runtime focus claude
