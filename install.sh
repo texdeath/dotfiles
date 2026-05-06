@@ -2,6 +2,31 @@
 set -euo pipefail
 
 DOTFILES="$(cd "$(dirname "$0")" && pwd)"
+
+# worktree から走らせると symlink target が worktree path に固定され、
+# worktree cleanup 後に shell / CLI が "No such file or directory" で失敗する。
+# canonical main checkout の install.sh を proxy-exec して main path を使う。
+# --dry-run は symlink を作らず worktree のファイル検証が目的なのでバイパスする。
+if [[ "${1:-}" != "--dry-run" ]] && git -C "$DOTFILES" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  _git_dir="$(git -C "$DOTFILES" rev-parse --git-dir 2>/dev/null)"
+  _git_common_dir="$(git -C "$DOTFILES" rev-parse --git-common-dir 2>/dev/null)"
+  if [[ "$_git_dir" != "$_git_common_dir" ]]; then
+    if [[ "${ALLOW_WORKTREE_INSTALL:-}" != "1" ]]; then
+      _canonical_root="$(dirname "$_git_common_dir")"
+      [[ "$_canonical_root" != /* ]] && _canonical_root="$(cd "$DOTFILES" && cd "$(dirname "$_git_common_dir")" && pwd)"
+      _canonical_install="$_canonical_root/install.sh"
+      if [[ -x "$_canonical_install" ]]; then
+        echo "INFO: worktree detected, proxy-exec'ing $_canonical_install" >&2
+        exec "$_canonical_install" "$@"
+      fi
+      echo "ERROR: main worktree 側の install.sh が見つかりません: $_canonical_install" >&2
+      echo "       worktree のまま install を強行する場合は ALLOW_WORKTREE_INSTALL=1 を指定してください。" >&2
+      exit 2
+    fi
+    echo "WARN: ALLOW_WORKTREE_INSTALL=1 が指定されたため worktree から続行します" >&2
+  fi
+fi
+
 LOG_DIR=$(mktemp -d)
 CURRENT_STEP=0
 START_TIME=$SECONDS
