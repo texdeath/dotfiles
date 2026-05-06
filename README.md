@@ -128,20 +128,6 @@ dotfiles/
     └── public-private-integration-design.md
 ```
 
-## orch-runtime の移管
-
-`orch-runtime` は orchestrate framework の runtime supervisor CLI として
-`texdeath/orchestrate` 側へ移管済み。この dotfiles repository は
-`~/bin/orch-runtime` を新規作成しない。
-
-既存の `~/bin/orch-runtime` がこの dotfiles checkout の
-`bin/orch-runtime` を指す symlink の場合、`install.sh` は stale symlink として
-削除する。別 repository や user 管理 script を指す symlink は触らない。
-
-`orch-runtime` を使う場合は `texdeath/orchestrate` を install し、
-`~/bin/orch-runtime` が orchestrate checkout の `bin/orch-runtime` を指すように
-symlink する。
-
 ## CI
 
 Push / PR で以下を自動検証:
